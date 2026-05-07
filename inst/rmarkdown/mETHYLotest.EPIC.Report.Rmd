@@ -1,0 +1,1102 @@
+---
+title: "mETHYLotest EPIC Report"
+date: "`r format(Sys.time(), '%d %B %Y, %H:%M')`"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float: { collapsed: false }
+    toc_depth: 3
+    number_sections: true
+    code_folding: hide
+    fig_width: 10
+    fig_height: 7
+    self_contained: true
+params:
+  project_dir: ""
+  beta: !r NULL
+  pheno: !r NULL
+  cfg: !r NULL
+  dmp_list: !r NULL
+  signatures_dir: ""
+  validation_results: !r NULL
+  top_n: 50
+---
+
+<style>
+h1.title{color:#8e44ad}
+h1{border-bottom:3px solid #8e44ad;padding-bottom:8px}
+h2{color:#2c3e50}
+
+.stat-box{display:inline-block;text-align:center;padding:15px 30px;
+  border-radius:8px;color:#fff;margin:5px;min-width:130px}
+.stat-box .big-num{margin:0;font-size:32px;font-weight:bold;line-height:1.2}
+.stat-box .label{margin:0;font-size:12px;opacity:.85}
+
+.sig-card{display:inline-block;text-align:center;padding:12px 20px;
+  border-radius:8px;color:#fff;margin:5px;min-width:120px}
+.sig-card .big-num{margin:0;font-size:24px;font-weight:bold;line-height:1.2}
+.sig-card .label{margin:0;font-size:11px;opacity:.85}
+
+.info-box{background:#eaf2f8;border-left:4px solid #3498db;
+  padding:12px 15px;border-radius:4px;margin:10px 0}
+.warn-box{background:#fdf2e9;border-left:4px solid #e67e22;
+  padding:12px 15px;border-radius:4px;margin:10px 0}
+
+img{max-width:100%!important;height:auto!important}
+.figure{max-width:100%;overflow-x:auto}
+.plotly,.html-widget{max-width:100%!important;overflow-x:auto}
+pre{overflow-x:auto}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE,
+  fig.align = "center", out.width = "100%", dpi = 150
+)
+
+suppressPackageStartupMessages({ library(ggplot2) })
+
+has_plotly    <- requireNamespace("plotly",      quietly = TRUE)
+has_rtsne    <- requireNamespace("Rtsne",       quietly = TRUE)
+has_mstats   <- requireNamespace("matrixStats", quietly = TRUE)
+has_patchwork<- requireNamespace("patchwork",   quietly = TRUE)
+has_proc     <- requireNamespace("pROC",        quietly = TRUE)
+has_scales   <- requireNamespace("scales",      quietly = TRUE)
+
+beta     <- params$beta
+pheno    <- params$pheno
+cfg      <- params$cfg
+dmp_list <- params$dmp_list
+top_n    <- params$top_n
+
+if (is.null(beta))    stop("beta is NULL")
+if (!is.matrix(beta)) stop("beta is not a matrix, it is: ", class(beta)[1])
+if (is.null(pheno))   stop("pheno is NULL")
+if (is.null(cfg))     stop("cfg is NULL")
+
+has_dmp <- is.list(dmp_list) && length(dmp_list) > 0
+
+# ═══════════════════════════════════════════════════════
+# Build groups vector
+# ═══════════════════════════════════════════════════════
+grp_var <- "Sample_Group"
+if (!is.null(cfg$analysis_pheno) && nzchar(cfg$analysis_pheno)) {
+  grp_var <- cfg$analysis_pheno
+}
+
+if (is.data.frame(pheno)) {
+  if (!"Sample_Name" %in% colnames(pheno)) {
+    if (!is.null(rownames(pheno)) &&
+        !identical(rownames(pheno), as.character(seq_len(nrow(pheno))))) {
+      pheno$Sample_Name <- rownames(pheno)
+    } else {
+      pheno$Sample_Name <- colnames(beta)[seq_len(nrow(pheno))]
+    }
+  }
+  if (!grp_var %in% colnames(pheno) && "Sample_Group" %in% colnames(pheno)) {
+    grp_var <- "Sample_Group"
+  }
+  if (grp_var %in% colnames(pheno)) {
+    pheno_vec <- setNames(as.character(pheno[[grp_var]]),
+                          as.character(pheno$Sample_Name))
+  } else {
+    other_cols <- setdiff(colnames(pheno), "Sample_Name")
+    if (length(other_cols) > 0) {
+      pheno_vec <- setNames(as.character(pheno[[other_cols[1]]]),
+                            as.character(pheno$Sample_Name))
+    } else {
+      pheno_vec <- setNames(rep("Unknown", nrow(pheno)),
+                            as.character(pheno$Sample_Name))
+    }
+  }
+} else if (is.character(pheno) || is.factor(pheno)) {
+  if (!is.null(names(pheno))) {
+    pheno_vec <- setNames(as.character(pheno), names(pheno))
+  } else {
+    pheno_vec <- setNames(as.character(pheno), colnames(beta))
+  }
+} else {
+  pheno_vec <- setNames(rep("Unknown", ncol(beta)), colnames(beta))
+}
+
+for (s in setdiff(colnames(beta), names(pheno_vec))) {
+  orig <- sub("_copy[0-9]*$", "", s)
+  if (orig %in% names(pheno_vec)) {
+    pheno_vec[s] <- pheno_vec[orig]
+  } else {
+    pheno_vec[s] <- "Unknown"
+  }
+}
+
+pheno_vec <- pheno_vec[colnames(beta)]
+pheno_vec[is.na(pheno_vec)] <- "Unknown"
+groups <- unname(pheno_vec)
+glvl   <- unique(groups)
+ng     <- length(glvl)
+
+# ═══════════════════════════════════════════════════════
+# Palette
+# ═══════════════════════════════════════════════════════
+base_cols <- c("#e74c3c","#3498db","#2ecc71","#f39c12",
+               "#9b59b6","#1abc9c","#e67e22","#34495e")
+if (ng <= length(base_cols)) {
+  pal <- setNames(base_cols[seq_len(ng)], glvl)
+} else if (has_scales) {
+  pal <- setNames(scales::hue_pal()(ng), glvl)
+} else {
+  pal <- setNames(rainbow(ng), glvl)
+}
+
+adj_thr <- if (!is.null(cfg$dmp_adj_p_val)) cfg$dmp_adj_p_val else 0.05
+db_thr  <- 0.1
+
+# ═══════════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════════
+row_vars <- function(m) {
+  if (has_mstats) {
+    matrixStats::rowVars(m, na.rm = TRUE)
+  } else {
+    apply(m, 1, var, na.rm = TRUE)
+  }
+}
+
+top_var_idx <- function(m, n = 10000) {
+  v <- row_vars(m)
+  v[!is.finite(v)] <- 0
+  head(order(v, decreasing = TRUE), min(n, nrow(m)))
+}
+
+impute_row_mean <- function(m) {
+  if (!any(is.na(m))) return(m)
+  rm <- rowMeans(m, na.rm = TRUE)
+  rm[is.na(rm)] <- 0.5
+  idx <- which(is.na(m), arr.ind = TRUE)
+  if (nrow(idx) > 0) {
+    m[idx] <- rm[idx[, 1]]
+  }
+  return(m)
+}
+
+lfc_col <- function(d) {
+  for (cn in c("logFC", "deltaBeta", "delta_beta")) {
+    if (cn %in% colnames(d)) return(cn)
+  }
+  return(NULL)
+}
+
+val_field <- function(v, fields, default = NULL) {
+  for (f in fields) {
+    if (!is.null(v[[f]])) return(v[[f]])
+  }
+  return(default)
+}
+
+# ═══════════════════════════════════════════════════════
+# Render helpers
+# ═══════════════════════════════════════════════════════
+.plot_counter <- 0L
+
+render_plot <- function(p, fig.width = 10, fig.height = 7) {
+  .plot_counter <<- .plot_counter + 1L
+  p_env <- new.env(parent = globalenv())
+  p_env$p <- p
+  chunk_id <- paste0("auto_plot_", .plot_counter)
+
+  if (inherits(p, "gtable") || inherits(p, "grob")) {
+    ct <- c(
+      sprintf("```{r %s, echo=FALSE, warning=FALSE, message=FALSE, fig.width=%s, fig.height=%s, out.width='100%%'}",
+              chunk_id, fig.width, fig.height),
+      "grid::grid.newpage()",
+      "grid::grid.draw(p)",
+      "```")
+  } else {
+    ct <- c(
+      sprintf("```{r %s, echo=FALSE, warning=FALSE, message=FALSE, fig.width=%s, fig.height=%s, out.width='100%%'}",
+              chunk_id, fig.width, fig.height),
+      "print(p)",
+      "```")
+  }
+  cat(knitr::knit_child(text = ct, envir = p_env, quiet = TRUE))
+}
+
+stat_box <- function(value, label, bg) {
+  sprintf('<div class="stat-box" style="background:%s;"><span class="big-num">%s</span><br><span class="label">%s</span></div>',
+          bg, value, label)
+}
+
+sig_card <- function(value, label, bg) {
+  sprintf('<div class="sig-card" style="background:%s;"><span class="big-num">%s</span><br><span class="label">%s</span></div>',
+          bg, value, label)
+}
+
+# ═══════════════════════════════════════════════════════
+# Validation helpers
+# ═══════════════════════════════════════════════════════
+find_val_result <- function(sig_name, val_res) {
+  if (!is.list(val_res) || length(val_res) == 0) return(NULL)
+  vn <- names(val_res)
+  if (sig_name %in% vn) return(val_res[[sig_name]])
+  nm_txt <- paste0(sig_name, ".txt")
+  if (nm_txt %in% vn) return(val_res[[nm_txt]])
+  nm_strip <- gsub("^DMP_default_", "", sig_name)
+  if (nm_strip %in% vn) return(val_res[[nm_strip]])
+  nm_strip_txt <- paste0(nm_strip, ".txt")
+  if (nm_strip_txt %in% vn) return(val_res[[nm_strip_txt]])
+  idx <- which(tolower(vn) == tolower(sig_name))
+  if (length(idx) > 0) return(val_res[[idx[1]]])
+  idx <- which(tolower(vn) == tolower(nm_strip))
+  if (length(idx) > 0) return(val_res[[idx[1]]])
+  idx <- grep(sig_name, vn, fixed = TRUE)
+  if (length(idx) > 0) return(val_res[[idx[1]]])
+  idx <- grep(nm_strip, vn, fixed = TRUE)
+  if (length(idx) > 0) return(val_res[[idx[1]]])
+  return(NULL)
+}
+
+extract_metrics <- function(v) {
+  m <- list()
+  for (nm in c("mean_accuracy","accuracy","overall_accuracy")) {
+    if (!is.null(v[[nm]]) && is.numeric(v[[nm]]) && length(v[[nm]])==1) { m$accuracy <- v[[nm]]; break }
+  }
+  for (nm in c("sd_accuracy","sd_acc")) {
+    if (!is.null(v[[nm]]) && is.numeric(v[[nm]])) { m$sd_accuracy <- v[[nm]]; break }
+  }
+  for (nm in c("auc","AUC","mean_auc")) {
+    if (!is.null(v[[nm]]) && is.numeric(v[[nm]])) { m$auc <- v[[nm]]; break }
+  }
+  for (nm in c("sensitivity","sens","Sensitivity","mean_sensitivity")) {
+    if (!is.null(v[[nm]]) && is.numeric(v[[nm]])) { m$sensitivity <- v[[nm]]; break }
+  }
+  for (nm in c("specificity","spec","Specificity","mean_specificity")) {
+    if (!is.null(v[[nm]]) && is.numeric(v[[nm]])) { m$specificity <- v[[nm]]; break }
+  }
+  sil <- v$silhouette
+  if (!is.null(sil)) {
+    if (is.numeric(sil) && length(sil)==1) {
+      m$silhouette <- sil
+    } else if (is.list(sil) && !is.null(sil$avg.width)) {
+      m$silhouette <- sil$avg.width
+    } else if (is.matrix(sil) || inherits(sil,"silhouette")) {
+      ss <- tryCatch(summary(sil), error=function(e) NULL)
+      if (!is.null(ss) && !is.null(ss$avg.width)) {
+        m$silhouette <- ss$avg.width
+        m$silhouette_per_cluster <- ss$clus.avg.widths
+      } else if (is.matrix(sil) && ncol(sil)>=3) {
+        m$silhouette <- mean(sil[,3], na.rm=TRUE)
+      }
+    }
+  }
+  svm <- v$svm_model
+  if (!is.null(svm)) {
+    m$has_svm <- TRUE
+    if (!is.null(svm$tot.accuracy)) m$svm_accuracy <- svm$tot.accuracy/100
+    if (!is.null(svm$accuracies)) {
+      m$svm_cv_accuracies <- svm$accuracies/100
+      if (is.null(m$accuracy)) m$accuracy <- mean(svm$accuracies/100)
+    }
+    m$svm_kernel <- if (!is.null(svm$kernel)) as.character(svm$kernel) else "unknown"
+    m$svm_nSV <- svm$nSV
+  }
+  pca_obj <- v$pca
+  if (!is.null(pca_obj)) {
+    m$has_pca <- TRUE
+    if (inherits(pca_obj,"prcomp")) {
+      ve <- pca_obj$sdev^2; m$pca_var_pct <- round(100*ve/sum(ve),1); m$pca_obj <- pca_obj
+    } else if (is.list(pca_obj) && !is.null(pca_obj$sdev)) {
+      ve <- pca_obj$sdev^2; m$pca_var_pct <- round(100*ve/sum(ve),1); m$pca_obj <- pca_obj
+    }
+  }
+  for (nm in c("fold_accuracies","cv_accuracy","accuracy_per_fold","fold_acc")) {
+    if (!is.null(v[[nm]]) && is.numeric(v[[nm]]) && length(v[[nm]])>1) { m$fold_accuracies <- v[[nm]]; break }
+  }
+  for (nm in c("confusion","confusion_matrix","conf_matrix")) {
+    if (!is.null(v[[nm]])) { m$confusion <- v[[nm]]; break }
+  }
+  for (nm in c("roc","roc_obj","ROC")) {
+    if (!is.null(v[[nm]])) { m$roc <- v[[nm]]; break }
+  }
+  if (!is.null(v$metric_used)) m$metric_used <- v$metric_used
+  if (!is.null(v$n_cpgs)) m$n_cpgs <- v$n_cpgs
+  return(m)
+}
+
+# ═══════════════════════════════════════════════════════
+# Prepare DMP data.frame
+# ═══════════════════════════════════════════════════════
+prepare_dmp_df <- function(d) {
+  if ("cgi" %in% colnames(d)) colnames(d)[colnames(d)=="cgi"] <- "CGI"
+  if (!("CGI" %in% colnames(d))) d$CGI <- "N/A"
+  if (!("feature" %in% colnames(d))) d$feature <- "N/A"
+  if (!("P.Value" %in% colnames(d))) {
+    if ("P.Val" %in% colnames(d)) { d$P.Value <- d$P.Val }
+    else if ("adj.P.Val" %in% colnames(d)) { d$P.Value <- d$adj.P.Val }
+    else { d$P.Value <- 1 }
+  }
+  lc <- lfc_col(d)
+  if (!is.null(lc)) { d$deltaBeta <- d[[lc]] } else { d$deltaBeta <- 0 }
+  d$deltaBeta[is.na(d$deltaBeta)] <- 0
+  if (!("adj.P.Val" %in% colnames(d))) d$adj.P.Val <- 1
+  d$adj.P.Val[is.na(d$adj.P.Val)] <- 1
+  d$Status <- ifelse(d$adj.P.Val < adj_thr & d$deltaBeta > db_thr, "Hyper",
+              ifelse(d$adj.P.Val < adj_thr & d$deltaBeta < -db_thr, "Hypo", "NS"))
+  return(d)
+}
+
+# ═══════════════════════════════════════════════════════
+# Render DMP panels (volcano, density, distributions,
+# feature x CGI, top DMPs)
+# heading: "###" or "####"
+# ═══════════════════════════════════════════════════════
+render_dmp_panels <- function(df, label, heading = "###") {
+
+  n_h <- sum(df$Status=="Hyper"); n_ho <- sum(df$Status=="Hypo")
+  df_sig <- df[df$Status != "NS", ]
+
+  # Volcano
+  cat(sprintf("\n%s Volcano\n\n", heading))
+  df_ns <- df[df$Status=="NS", ]
+  if (nrow(df_ns)>5000) df_ns <- df_ns[sample(nrow(df_ns),5000), ]
+  df_viz <- rbind(df_sig, df_ns)
+  df_viz$Status <- factor(df_viz$Status, levels=c("Hyper","Hypo","NS"))
+  p <- ggplot(df_viz, aes(deltaBeta, -log10(adj.P.Val), colour=Status)) +
+    geom_point(alpha=.5, size=.8) +
+    scale_colour_manual(values=c(Hyper="#d9534f",Hypo="#0275d8",NS="grey70"), drop=FALSE) +
+    geom_hline(yintercept=-log10(adj_thr), linetype="dashed", colour="grey40") +
+    geom_vline(xintercept=c(-db_thr, db_thr), linetype="dotted", colour="grey60") +
+    labs(title=sprintf("%s - %d Hyper / %d Hypo", label, n_h, n_ho),
+         x="Delta Beta", y="-log10(adj. P)") +
+    theme_minimal(base_size=12)
+  render_plot(p, fig.width=10, fig.height=5)
+  cat("\n\n")
+
+  # Density
+  cat(sprintf("\n%s Density\n\n", heading))
+  if (nrow(df_sig)>0) {
+    p <- ggplot(df_sig, aes(deltaBeta, fill=Status)) + geom_density(alpha=.6) +
+      scale_fill_manual(values=c(Hyper="#d9534f",Hypo="#0275d8")) +
+      labs(title=sprintf("Delta Beta Density - %s", label), x="Delta Beta", y="Density") +
+      theme_minimal(base_size=12)
+    render_plot(p, fig.width=10, fig.height=5)
+  } else { cat("No significant DMPs.\n") }
+  cat("\n\n")
+
+  # Distributions
+  cat(sprintf("\n%s Distributions\n\n", heading))
+  if (nrow(df_sig)>0) {
+    pp <- list()
+    tbl_cgi <- as.data.frame(table(df_sig$CGI, df_sig$Status), stringsAsFactors=FALSE)
+    colnames(tbl_cgi) <- c("CGI","Status","N"); tbl_cgi <- tbl_cgi[tbl_cgi$N>0,]
+    if (nrow(tbl_cgi)>0)
+      pp[[length(pp)+1]] <- ggplot(tbl_cgi, aes(reorder(CGI,N), N, fill=Status)) +
+        geom_col(position="dodge") + scale_fill_manual(values=c(Hyper="#d9534f",Hypo="#0275d8")) +
+        coord_flip() + labs(title="CGI", x=NULL, y="Count") +
+        theme_minimal(base_size=10) + theme(legend.position="none")
+
+    tbl_feat <- as.data.frame(table(df_sig$feature, df_sig$Status), stringsAsFactors=FALSE)
+    colnames(tbl_feat) <- c("Feature","Status","N"); tbl_feat <- tbl_feat[tbl_feat$N>0,]
+    if (nrow(tbl_feat)>0)
+      pp[[length(pp)+1]] <- ggplot(tbl_feat, aes(reorder(Feature,N), N, fill=Status)) +
+        geom_col(position="dodge") + scale_fill_manual(values=c(Hyper="#d9534f",Hypo="#0275d8")) +
+        coord_flip() + labs(title="Gene Feature", x=NULL, y="Count") +
+        theme_minimal(base_size=10) + theme(legend.position="none")
+
+    if ("CHR" %in% colnames(df_sig)) {
+      chr_f <- factor(gsub("chr","", as.character(df_sig$CHR), ignore.case=TRUE),
+                      levels=c(as.character(1:22),"X","Y"))
+      tbl_chr <- as.data.frame(table(chr_f, df_sig$Status), stringsAsFactors=FALSE)
+      colnames(tbl_chr) <- c("Chr","Status","N"); tbl_chr <- tbl_chr[tbl_chr$N>0,]
+      if (nrow(tbl_chr)>0)
+        pp[[length(pp)+1]] <- ggplot(tbl_chr, aes(Chr, as.integer(N), fill=Status)) +
+          geom_col(position="dodge") + scale_fill_manual(values=c(Hyper="#d9534f",Hypo="#0275d8")) +
+          labs(title="Chromosome", x=NULL, y="Count") +
+          theme_minimal(base_size=10) +
+          theme(axis.text.x=element_text(angle=45,hjust=1), legend.position="bottom")
+    }
+    if (length(pp)>0) {
+      if (has_patchwork) {
+        render_plot(patchwork::wrap_plots(pp, ncol=min(3,length(pp))), fig.width=12, fig.height=5)
+      } else {
+        for (plt in pp) render_plot(plt, fig.width=6, fig.height=5)
+      }
+    }
+  } else { cat("No significant DMPs.\n") }
+  cat("\n\n")
+
+  # Feature x CGI
+  cat(sprintf("\n%s Feature x CGI\n\n", heading))
+  if (nrow(df_sig)>0 && any(df_sig$CGI!="N/A") && any(df_sig$feature!="N/A")) {
+    p <- ggplot(df_sig, aes(feature, fill=CGI)) +
+      geom_bar(position="fill") + facet_wrap(~Status) +
+      scale_fill_viridis_d() + labs(title=label, y="Proportion") +
+      theme_minimal(base_size=11) + theme(axis.text.x=element_text(angle=45,hjust=1))
+    render_plot(p, fig.width=10, fig.height=5)
+  } else { cat("No annotation data.\n") }
+  cat("\n\n")
+
+  # Top DMPs
+  cat(sprintf("\n%s Top DMPs\n\n", heading))
+  df_top <- df_sig[order(df_sig$adj.P.Val), ]
+  df_top <- head(df_top, top_n)
+  if (nrow(df_top)>0) {
+    df_top$CpG <- rownames(df_top)
+    show_cols <- intersect(
+      c("CpG","deltaBeta","adj.P.Val","P.Value","CHR","MAPINFO",
+        "gene","feature","CGI","Status",
+        "UCSC_RefGene_Name","UCSC_RefGene_Group","Relation_to_Island"),
+      colnames(df_top))
+    for (pc in intersect(c("P.Value","adj.P.Val"), show_cols)) {
+      df_top[[pc]] <- signif(df_top[[pc]], 3)
+    }
+    print(knitr::kable(df_top[, show_cols, drop=FALSE], format="html", row.names=FALSE,
+      table.attr='class="table table-striped table-condensed" style="font-size:12px;"'))
+  } else { cat("No significant DMPs.\n") }
+  cat("\n\n")
+}
+
+# ═══════════════════════════════════════════════════════
+# Load signatures
+# ═══════════════════════════════════════════════════════
+signatures  <- list()
+sig_sources <- character(0)
+has_sigs    <- FALSE
+
+sig_dir_param <- params$signatures_dir
+if (!is.null(sig_dir_param) && nzchar(sig_dir_param) && dir.exists(sig_dir_param)) {
+  sig_files <- list.files(sig_dir_param, pattern="\\.txt$", full.names=TRUE)
+  for (f in sig_files) {
+    nm <- tools::file_path_sans_ext(basename(f))
+    cpgs <- readLines(f, warn=FALSE)
+    cpgs <- cpgs[nzchar(trimws(cpgs))]
+    if (length(cpgs)>0) {
+      signatures[[nm]] <- cpgs
+      sig_sources[nm] <- if (grepl("^DMP_default_", nm)) "Default" else "User"
+    }
+  }
+  has_sigs <- length(signatures) > 0
+}
+
+val_res <- params$validation_results
+has_val <- is.list(val_res) && length(val_res) > 0
+```
+
+<!-- ================================================================== -->
+<!-- 1. PROJECT OVERVIEW                                                 -->
+<!-- ================================================================== -->
+
+# Project Overview
+
+```{r overview, results='asis'}
+cat('<div style="display:flex;flex-wrap:wrap;gap:8px;margin:15px 0;">')
+cat(stat_box(ncol(beta), "Samples", "#8e44ad"))
+cat(stat_box(format(nrow(beta), big.mark=","), "CpG Probes", "#3498db"))
+cat(stat_box(ng, "Groups", "#27ae60"))
+if (has_dmp) {
+  ns <- sum(sapply(dmp_list, function(d) {
+    if ("adj.P.Val" %in% colnames(d)) sum(d$adj.P.Val < adj_thr, na.rm=TRUE) else 0L
+  }))
+  cat(stat_box(format(ns, big.mark=","), "Sig. DMPs", "#e74c3c"))
+}
+if (has_sigs) cat(stat_box(length(signatures), "Signatures", "#e67e22"))
+cat('</div>')
+```
+
+## Configuration {-}
+
+```{r config_tbl}
+safe <- function(x, fb="---") {
+  if (is.null(x)||length(x)==0||all(is.na(x))) return(fb)
+  paste(as.character(x), collapse=", ")
+}
+cfg_df <- data.frame(
+  Parameter = c("Project","Normalisation","Imputation","Cell-type",
+                "Batch","DMP","DMR","Block","GSEA","CNA"),
+  Value = c(
+    safe(cfg$project_name), safe(cfg$norm_method),
+    if (isTRUE(cfg$do_impute)) safe(cfg$impute_method) else "No",
+    if (isTRUE(cfg$do_refbase)) "Yes (blood)" else "No",
+    if (isTRUE(cfg$perform_batch_correction)) safe(cfg$batch_cols) else "No",
+    if (isTRUE(cfg$do_dmp)) paste0("adj.P < ", safe(cfg$dmp_adj_p_val,"0.05")) else "No",
+    if (isTRUE(cfg$do_dmr)) safe(cfg$dmr_method) else "No",
+    if (isTRUE(cfg$do_block)) "Yes" else "No",
+    if (isTRUE(cfg$do_gsea)) safe(cfg$gsea_method) else "No",
+    if (isTRUE(cfg$do_cna)) "Yes" else "No"),
+  stringsAsFactors=FALSE)
+knitr::kable(cfg_df, format="html", table.attr='class="table table-striped table-condensed"')
+```
+
+## Samples per Group {-}
+
+```{r grp_tbl}
+grp_tbl <- as.data.frame(table(Group=groups), stringsAsFactors=FALSE)
+colnames(grp_tbl) <- c("Group","N")
+knitr::kable(grp_tbl, format="html", table.attr='class="table table-bordered"')
+```
+
+<!-- ================================================================== -->
+<!-- 2. QUALITY CONTROL                                                  -->
+<!-- ================================================================== -->
+
+# Quality Control {.tabset}
+
+## Beta Density
+
+```{r beta_density, fig.height=5}
+set.seed(42)
+n_probes <- min(50000, nrow(beta))
+idx <- sample(nrow(beta), n_probes)
+bs <- beta[idx, , drop=FALSE]
+
+df_d <- do.call(rbind, lapply(seq_len(ncol(bs)), function(j) {
+  vals <- bs[,j]; vals <- vals[is.finite(vals)]
+  if (length(vals)==0) return(NULL)
+  data.frame(b=vals, Sample=colnames(bs)[j], Group=groups[j], stringsAsFactors=FALSE)
+}))
+
+if (!is.null(df_d) && nrow(df_d)>0) {
+  p <- ggplot(df_d, aes(b, colour=Group, group=Sample)) +
+    geom_density(linewidth=.35, alpha=.4) + scale_colour_manual(values=pal) +
+    labs(title="Beta-value Density", x=expression(beta), y="Density") +
+    theme_minimal(base_size=13) + theme(legend.position="bottom")
+  if (has_plotly) plotly::ggplotly(p) else p
+} else { cat("No valid beta values.\n") }
+```
+
+## PCA {.tabset}
+
+```{r pca_compute}
+idx_v <- top_var_idx(beta, 10000)
+bpca <- impute_row_mean(beta[idx_v,,drop=FALSE])
+pca <- prcomp(t(bpca), scale.=TRUE, center=TRUE)
+vpct <- round(100*pca$sdev^2/sum(pca$sdev^2), 1)
+n_pc <- min(5, ncol(pca$x))
+pcdf <- data.frame(pca$x[,seq_len(n_pc),drop=FALSE], Group=groups, Sample=colnames(beta))
+```
+
+### PC1 vs PC2
+
+```{r pca12, fig.height=6}
+p <- ggplot(pcdf, aes(PC1, PC2, colour=Group, label=Sample)) +
+  geom_point(size=3, alpha=.8) + scale_colour_manual(values=pal) +
+  labs(title="PCA - PC1 vs PC2", x=sprintf("PC1 (%s%%)", vpct[1]),
+       y=sprintf("PC2 (%s%%)", vpct[2])) +
+  theme_minimal(base_size=13) + theme(legend.position="bottom")
+grp_counts <- table(groups)
+if (any(grp_counts>=3))
+  p <- p + stat_ellipse(level=.90, linetype="dashed", linewidth=.6, show.legend=FALSE,
+                         data=pcdf[groups %in% names(grp_counts[grp_counts>=3]),])
+if (has_plotly) plotly::ggplotly(p) else p
+```
+
+### PC2 vs PC3
+
+```{r pca23, fig.height=6}
+if (n_pc>=3) {
+  p <- ggplot(pcdf, aes(PC2, PC3, colour=Group, label=Sample)) +
+    geom_point(size=3, alpha=.8) + scale_colour_manual(values=pal) +
+    labs(title="PCA - PC2 vs PC3", x=sprintf("PC2 (%s%%)", vpct[2]),
+         y=sprintf("PC3 (%s%%)", vpct[3])) +
+    theme_minimal(base_size=13) + theme(legend.position="bottom")
+  if (has_plotly) plotly::ggplotly(p) else p
+} else { cat("Fewer than 3 PCs.") }
+```
+
+### Scree Plot
+
+```{r scree, fig.height=4}
+ns <- min(15, length(vpct))
+sdf <- data.frame(PC=seq_len(ns), V=vpct[seq_len(ns)])
+ggplot(sdf, aes(PC, V)) + geom_col(fill="#8e44ad", alpha=.8) +
+  geom_line(colour="#e74c3c", linewidth=1) + geom_point(colour="#e74c3c", size=2) +
+  labs(title="Scree Plot", x="PC", y="Variance (%)") +
+  scale_x_continuous(breaks=sdf$PC) + theme_minimal(base_size=13)
+```
+
+## t-SNE
+
+```{r tsne, fig.height=6}
+tsne_out <- NULL
+if (has_rtsne && ncol(beta)>=4) {
+  bt <- t(impute_row_mean(beta[top_var_idx(beta,5000),,drop=FALSE]))
+  dups <- duplicated(bt); n_unique <- sum(!dups)
+  perp <- min(30, floor((n_unique-1)/3))
+  if (perp>=1 && n_unique>=4) {
+    set.seed(42)
+    tsne <- Rtsne::Rtsne(bt[!dups,,drop=FALSE], perplexity=perp,
+                          check_duplicates=FALSE, verbose=FALSE)
+    tdf <- data.frame(D1=tsne$Y[,1], D2=tsne$Y[,2],
+                       Group=groups[!dups], Sample=colnames(beta)[!dups])
+    tsne_out <- ggplot(tdf, aes(D1, D2, colour=Group, label=Sample)) +
+      geom_point(size=3, alpha=.8) + scale_colour_manual(values=pal) +
+      labs(title=sprintf("t-SNE (perplexity=%d)", perp), x="t-SNE 1", y="t-SNE 2") +
+      theme_minimal(base_size=13) + theme(legend.position="bottom")
+  } else { cat("Not enough unique samples.") }
+} else { cat("Rtsne not installed or < 4 samples.") }
+if (!is.null(tsne_out)) { if (has_plotly) plotly::ggplotly(tsne_out) else tsne_out }
+```
+
+<!-- ================================================================== -->
+<!-- 3. DMP ANALYSIS                                                     -->
+<!-- ================================================================== -->
+
+```{r dmp_gate, results='asis'}
+if (!has_dmp) {
+  cat("\n# DMP Analysis\n\n",'<div class="info-box">No DMP results provided.</div>\n')
+}
+```
+
+```{r dmp_content, eval=has_dmp, results='asis', fig.width=10, fig.height=5}
+cat("\n# DMP Analysis {.tabset}\n\n")
+
+# ══════════════════════════════════════════════════════
+# We merge all comparisons into one df_full
+# (for most projects there is a single comparison)
+# ══════════════════════════════════════════════════════
+all_dmp_dfs <- lapply(names(dmp_list), function(nm) {
+  d <- prepare_dmp_df(dmp_list[[nm]])
+  d$.comparison <- nm
+  return(d)
+})
+df_full <- do.call(rbind, all_dmp_dfs)
+
+n_comparisons <- length(dmp_list)
+sig_cpg_names <- rownames(df_full)[df_full$Status != "NS"]
+
+# ══════════════════════════════════════════════════════
+# ## Summary
+# ══════════════════════════════════════════════════════
+cat("## Summary\n\n")
+
+# Stat cards
+n_total <- nrow(df_full)
+n_sig   <- sum(df_full$Status != "NS")
+n_hyper <- sum(df_full$Status == "Hyper")
+n_hypo  <- sum(df_full$Status == "Hypo")
+
+cat('<div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;">\n')
+cat(stat_box(format(n_total, big.mark=","), "Total CpGs Tested", "#8e44ad"))
+cat(stat_box(format(n_sig, big.mark=","), "Significant", "#e74c3c"))
+cat(stat_box(format(n_hyper, big.mark=","), "Hyper", "#d9534f"))
+cat(stat_box(format(n_hypo, big.mark=","), "Hypo", "#0275d8"))
+if (n_comparisons > 1) {
+  cat(stat_box(n_comparisons, "Comparisons", "#27ae60"))
+}
+if (has_sigs) {
+  cat(stat_box(length(signatures), "Signatures", "#e67e22"))
+}
+cat('</div>\n\n')
+
+# Per-comparison table
+if (n_comparisons >= 1) {
+  summ <- do.call(rbind, lapply(names(dmp_list), function(nm) {
+    d <- df_full[df_full$.comparison == nm, ]
+    data.frame(Comparison = nm,
+               Total      = nrow(d),
+               Significant= sum(d$Status != "NS"),
+               Hyper      = sum(d$Status == "Hyper"),
+               Hypo       = sum(d$Status == "Hypo"),
+               stringsAsFactors = FALSE)
+  }))
+  print(knitr::kable(summ, format="html",
+    table.attr='class="table table-bordered table-striped"'))
+  cat("\n\n")
+}
+
+# Signatures overlap table
+if (has_sigs && length(sig_cpg_names) > 0) {
+  cat("**Signatures overlap:**\n\n")
+  ovl_df <- do.call(rbind, lapply(names(signatures), function(sn) {
+    sc <- signatures[[sn]]
+    in_dmp <- sum(sc %in% sig_cpg_names)
+    pct_sig <- if (length(sig_cpg_names)>0) 100*in_dmp/length(sig_cpg_names) else 0
+    pct_cov <- if (length(sc)>0) 100*in_dmp/length(sc) else 0
+    val_txt <- ""
+    if (has_val) {
+      vr <- find_val_result(sn, val_res)
+      if (!is.null(vr)) {
+        em <- extract_metrics(vr); parts <- c()
+        if (!is.null(em$silhouette)) parts <- c(parts, sprintf("Sil=%.3f", em$silhouette))
+        if (!is.null(em$accuracy))   parts <- c(parts, sprintf("Acc=%.1f%%", 100*em$accuracy))
+        if (length(parts)>0) val_txt <- paste(parts, collapse=", ")
+      }
+    }
+    data.frame(Signature=sn, Source=sig_sources[sn], Sig_CpGs=length(sc),
+               Overlap=in_dmp, Pct_DMPs=sprintf("%.1f%%",pct_sig),
+               Pct_Sig=sprintf("%.1f%%",pct_cov), Validation=val_txt,
+               stringsAsFactors=FALSE)
+  }))
+  ovl_df <- ovl_df[order(-ovl_df$Overlap), ]
+  print(knitr::kable(ovl_df, format="html", row.names=FALSE,
+    table.attr='class="table table-striped table-bordered" style="font-size:12px;"'))
+  cat("\n\n")
+}
+
+# ══════════════════════════════════════════════════════
+# ## All DMPs {.tabset}
+# ══════════════════════════════════════════════════════
+cat("\n\n## All DMPs {.tabset}\n\n")
+
+# Use df_full for all DMPs panels
+render_dmp_panels(df_full, label = "All DMPs", heading = "###")
+
+# Heatmap of top DMPs
+if (length(sig_cpg_names) >= 2) {
+  cat("### Heatmap\n\n")
+  hm_cpgs <- head(sig_cpg_names[order(df_full[sig_cpg_names, "adj.P.Val"])], 100)
+  hm_cpgs <- intersect(hm_cpgs, rownames(beta))
+  if (length(hm_cpgs) >= 2) {
+    bhm <- impute_row_mean(beta[hm_cpgs, , drop=FALSE])
+    annot_c <- data.frame(Group=groups, row.names=colnames(beta))
+    tryCatch({
+      hm <- pheatmap::pheatmap(bhm, scale="row",
+        show_rownames=length(hm_cpgs)<=60, show_colnames=ncol(beta)<=40,
+        annotation_col=annot_c, annotation_colors=list(Group=pal),
+        clustering_method="ward.D2",
+        color=colorRampPalette(c("#3498db","#ecf0f1","#e74c3c"))(100),
+        border_color=NA,
+        fontsize_row=if(length(hm_cpgs)<=30) 7 else 5,
+        fontsize_col=if(ncol(beta)<=20) 9 else 7,
+        main=sprintf("Top %d DMPs", length(hm_cpgs)), silent=TRUE)
+      render_plot(hm$gtable, fig.width=10, fig.height=8)
+    }, error=function(e) cat("Heatmap failed.\n"))
+  }
+  cat("\n\n")
+}
+
+# ══════════════════════════════════════════════════════
+# ## One tab per signature
+# ══════════════════════════════════════════════════════
+if (has_sigs) {
+  for (sn in names(signatures)) {
+    sig_cpgs <- signatures[[sn]]
+    shared   <- intersect(sig_cpgs, rownames(df_full))
+
+    if (length(shared) < 2) next
+
+    df_sig_sub <- df_full[shared, , drop=FALSE]
+    n_sig_in <- sum(df_sig_sub$Status != "NS")
+
+    cat(sprintf("\n\n## %s {.tabset}\n\n", sn))
+
+    # ── Summary sub-tab ──
+    cat("### Summary\n\n")
+
+    src <- sig_sources[sn]
+    badge_col <- if (identical(src,"Default")) "#3498db" else "#27ae60"
+    cat(sprintf(
+      '<div class="info-box"><span style="background:%s;color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;">%s</span> &nbsp; <strong>%d CpGs</strong> in signature, <strong>%d</strong> in DMP table, <strong>%d</strong> significant.</div>\n\n',
+      badge_col, src, length(sig_cpgs), length(shared), n_sig_in))
+
+    # Stat cards for this signature
+    cat('<div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;">\n')
+    cat(sig_card(length(sig_cpgs), "CpGs in Sig.", "#34495e"))
+    cat(sig_card(length(shared), "In DMP Table", "#8e44ad"))
+    cat(sig_card(n_sig_in, "Significant", "#e74c3c"))
+    cat(sig_card(sum(df_sig_sub$Status=="Hyper"), "Hyper", "#d9534f"))
+    cat(sig_card(sum(df_sig_sub$Status=="Hypo"), "Hypo", "#0275d8"))
+
+    # Validation metrics
+    if (has_val) {
+      vr <- find_val_result(sn, val_res)
+      if (!is.null(vr)) {
+        em <- extract_metrics(vr)
+        if (!is.null(em$silhouette)) {
+          sc <- if (em$silhouette>0.5) "#27ae60" else if (em$silhouette>0.25) "#f39c12" else "#e74c3c"
+          cat(sig_card(sprintf("%.3f", em$silhouette), "Silhouette", sc))
+        }
+        if (!is.null(em$accuracy)) {
+          cat(sig_card(sprintf("%.1f%%", 100*em$accuracy), "Accuracy", "#8e44ad"))
+        }
+        if (isTRUE(em$has_svm)) {
+          cat(sig_card("&#10004;", "SVM", "#9b59b6"))
+        }
+        if (!is.null(em$metric_used)) {
+          cat(sig_card(em$metric_used, "Metric", "#1abc9c"))
+        }
+      }
+    }
+    cat('</div>\n\n')
+
+    # Coverage of DMPs
+    if (length(sig_cpg_names) > 0) {
+      pct <- 100 * sum(sig_cpgs %in% sig_cpg_names) / length(sig_cpg_names)
+      cat(sprintf('<div class="info-box">This signature covers <strong>%.1f%%</strong> of all significant DMPs.</div>\n\n', pct))
+    }
+
+    # ── DMP panels ──
+    render_dmp_panels(df_sig_sub, label = sn, heading = "###")
+
+    # ── Heatmap ──
+    sig_in_beta <- intersect(shared, rownames(beta))
+    if (length(sig_in_beta) >= 2) {
+      cat("### Heatmap\n\n")
+      hm_cpgs <- if (length(sig_in_beta)>150) sig_in_beta[1:150] else sig_in_beta
+      bhm <- impute_row_mean(beta[hm_cpgs, , drop=FALSE])
+      annot_c <- data.frame(Group=groups, row.names=colnames(beta))
+      tryCatch({
+        hm <- pheatmap::pheatmap(bhm, scale="row",
+          show_rownames=length(hm_cpgs)<=60, show_colnames=ncol(beta)<=40,
+          annotation_col=annot_c, annotation_colors=list(Group=pal),
+          clustering_method="ward.D2",
+          color=colorRampPalette(c("#3498db","#ecf0f1","#e74c3c"))(100),
+          border_color=NA,
+          fontsize_row=if(length(hm_cpgs)<=30) 7 else 5,
+          fontsize_col=if(ncol(beta)<=20) 9 else 7,
+          main=sprintf("%s (%d CpGs)", sn, length(hm_cpgs)), silent=TRUE)
+        render_plot(hm$gtable, fig.width=10, fig.height=8)
+      }, error=function(e) cat("Heatmap failed.\n"))
+      cat("\n\n")
+    }
+
+    # ── PCA ──
+    if (length(sig_in_beta) >= 3) {
+      cat("### PCA\n\n")
+      bsig <- impute_row_mean(beta[sig_in_beta, , drop=FALSE])
+      pca_s <- prcomp(t(bsig), scale.=TRUE, center=TRUE)
+      vp_s <- round(100*pca_s$sdev^2/sum(pca_s$sdev^2), 1)
+      pdf_s <- data.frame(PC1=pca_s$x[,1], PC2=pca_s$x[,2],
+                           Group=groups, Sample=colnames(beta))
+      p <- ggplot(pdf_s, aes(PC1, PC2, colour=Group, label=Sample)) +
+        geom_point(size=3.5, alpha=.85) + scale_colour_manual(values=pal) +
+        labs(title=sprintf("PCA - %s (%d CpGs)", sn, length(sig_in_beta)),
+             x=sprintf("PC1 (%s%%)", vp_s[1]), y=sprintf("PC2 (%s%%)", vp_s[2])) +
+        theme_minimal(base_size=13) + theme(legend.position="bottom")
+      grp_c <- table(groups)
+      if (any(grp_c>=3)) {
+        p <- p + stat_ellipse(level=.95, linetype=2, linewidth=.7, show.legend=FALSE,
+                               data=pdf_s[groups %in% names(grp_c[grp_c>=3]),])
+      }
+      render_plot(p, fig.width=10, fig.height=7)
+      cat("\n\n")
+    }
+  }
+}
+```
+
+<!-- ================================================================== -->
+<!-- 4. SIGNATURES & VALIDATION                                          -->
+<!-- ================================================================== -->
+
+```{r sig_gate, results='asis'}
+if (!has_sigs && !has_val) {
+  cat("\n# Signatures & Validation\n\n",
+      '<div class="info-box">No signatures found.</div>\n')
+}
+```
+
+```{r sig_content, eval=has_sigs, results='asis', fig.width=10, fig.height=7}
+cat("\n# Signatures & Validation {.tabset}\n\n")
+
+# ── Inventory ──
+cat("## Inventory\n\n")
+n_default <- sum(sig_sources=="Default"); n_user <- sum(sig_sources=="User")
+cat('<div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 20px 0;">')
+cat(sig_card(length(signatures), "Total", "#8e44ad"))
+cat(sig_card(n_default, "Default", "#3498db"))
+cat(sig_card(n_user, "User", "#27ae60"))
+cat('</div>\n\n')
+
+inv_df <- data.frame(
+  Signature=names(signatures),
+  Source=unname(sig_sources[names(signatures)]),
+  N_CpGs=sapply(signatures, length),
+  In_Beta=sapply(signatures, function(cpgs) sum(cpgs %in% rownames(beta))),
+  stringsAsFactors=FALSE)
+inv_df$Coverage <- sprintf("%.0f%%", 100*inv_df$In_Beta/pmax(inv_df$N_CpGs,1))
+
+if (has_val) {
+  inv_df$Silhouette <- sapply(names(signatures), function(nm) {
+    v <- find_val_result(nm, val_res); if (is.null(v)) return(NA_character_)
+    em <- extract_metrics(v)
+    if (!is.null(em$silhouette)) sprintf("%.3f", em$silhouette) else NA_character_
+  })
+  inv_df$Accuracy <- sapply(names(signatures), function(nm) {
+    v <- find_val_result(nm, val_res); if (is.null(v)) return(NA_character_)
+    em <- extract_metrics(v)
+    if (!is.null(em$accuracy)) sprintf("%.1f%%", 100*em$accuracy) else NA_character_
+  })
+}
+print(knitr::kable(inv_df, format="html", row.names=FALSE,
+  table.attr='class="table table-striped table-bordered" style="font-size:12px;"'))
+cat("\n\n")
+
+# ── Per-signature ──
+for (sig_name in names(signatures)) {
+  cpgs <- signatures[[sig_name]]
+  cpgs_in_beta <- intersect(cpgs, rownames(beta))
+
+  cat(sprintf("\n\n## %s {.tabset}\n\n", sig_name))
+
+  src <- sig_sources[sig_name]
+  badge_col <- if (identical(src,"Default")) "#3498db" else "#27ae60"
+  cat(sprintf(
+    '<div class="info-box"><span style="background:%s;color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;">%s</span> &nbsp; <strong>%d CpGs</strong> (%d in beta).</div>\n\n',
+    badge_col, src, length(cpgs), length(cpgs_in_beta)))
+
+  # Metrics
+  cat("### Metrics\n\n")
+  v <- find_val_result(sig_name, val_res)
+  if (is.null(v)) {
+    cat('<div class="warn-box">No validation result found for this signature.</div>\n\n')
+  } else {
+    em <- extract_metrics(v)
+    has_any_card <- FALSE
+    cat('<div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;">\n')
+    if (!is.null(em$n_cpgs)) { cat(sig_card(em$n_cpgs, "CpGs", "#34495e")); has_any_card <- TRUE }
+    if (!is.null(em$silhouette)) {
+      sc <- if (em$silhouette>0.5) "#27ae60" else if (em$silhouette>0.25) "#f39c12" else "#e74c3c"
+      cat(sig_card(sprintf("%.3f", em$silhouette), "Silhouette", sc)); has_any_card <- TRUE
+    }
+    if (!is.null(em$accuracy)) {
+      lab <- if (!is.null(em$sd_accuracy)) sprintf("%.1f%% +/- %.1f%%", 100*em$accuracy, 100*em$sd_accuracy)
+             else sprintf("%.1f%%", 100*em$accuracy)
+      cat(sig_card(lab, "Accuracy", "#8e44ad")); has_any_card <- TRUE
+    }
+    if (!is.null(em$svm_accuracy)) { cat(sig_card(sprintf("%.1f%%", 100*em$svm_accuracy), "SVM Acc.", "#8e44ad")); has_any_card <- TRUE }
+    if (!is.null(em$auc)) { cat(sig_card(sprintf("%.3f", em$auc), "AUC", "#e74c3c")); has_any_card <- TRUE }
+    if (!is.null(em$sensitivity)) { cat(sig_card(sprintf("%.1f%%", 100*em$sensitivity), "Sensitivity", "#3498db")); has_any_card <- TRUE }
+    if (!is.null(em$specificity)) { cat(sig_card(sprintf("%.1f%%", 100*em$specificity), "Specificity", "#27ae60")); has_any_card <- TRUE }
+    if (isTRUE(em$has_svm)) { cat(sig_card("&#10004;", "SVM Model", "#9b59b6")); has_any_card <- TRUE }
+    if (!is.null(em$metric_used)) { cat(sig_card(em$metric_used, "Metric Used", "#1abc9c")); has_any_card <- TRUE }
+    if (!is.null(em$pca_var_pct)) {
+      pc12 <- sum(em$pca_var_pct[1:min(2,length(em$pca_var_pct))])
+      cat(sig_card(sprintf("%.1f%%", pc12), "PCA Var (PC1+2)", "#e67e22")); has_any_card <- TRUE
+    }
+    cat('</div>\n\n')
+    if (!has_any_card) cat('<div class="warn-box">No displayable metrics.</div>\n\n')
+
+    # Silhouette interpretation
+    if (!is.null(em$silhouette)) {
+      sil_v <- em$silhouette
+      interp <- if (sil_v>0.7) "Strong structure" else if (sil_v>0.5) "Reasonable structure"
+                else if (sil_v>0.25) "Weak structure" else "No substantial structure"
+      cat(sprintf('<div class="info-box"><strong>Silhouette = %.3f</strong> &mdash; %s. Values &gt; 0.5 indicate good cluster separation.</div>\n\n', sil_v, interp))
+      if (!is.null(em$silhouette_per_cluster)) {
+        scd <- data.frame(Cluster=factor(seq_along(em$silhouette_per_cluster)),
+                          Sil=em$silhouette_per_cluster)
+        p <- ggplot(scd, aes(Cluster, Sil, fill=Sil>0.5)) +
+          geom_col(alpha=.85, show.legend=FALSE) +
+          scale_fill_manual(values=c("TRUE"="#27ae60","FALSE"="#e74c3c")) +
+          geom_hline(yintercept=em$silhouette, linetype="dashed", colour="#3498db") +
+          labs(title="Per-Cluster Silhouette", x="Cluster", y="Avg. Silhouette") +
+          theme_minimal(base_size=12)
+        render_plot(p, fig.width=8, fig.height=4); cat("\n\n")
+      }
+    }
+
+    # SVM
+    if (isTRUE(em$has_svm)) {
+      cat('<div class="info-box"><strong>SVM Classifier</strong>')
+      if (!is.null(em$svm_kernel)) cat(sprintf(' &mdash; Kernel: %s', em$svm_kernel))
+      if (!is.null(em$svm_nSV)) cat(sprintf(' &mdash; SVs: %s', paste(em$svm_nSV, collapse=" / ")))
+      cat('</div>\n\n')
+      if (!is.null(em$svm_cv_accuracies) && length(em$svm_cv_accuracies)>1) {
+        fdf <- data.frame(Fold=factor(seq_along(em$svm_cv_accuracies)), Acc=em$svm_cv_accuracies)
+        p <- ggplot(fdf, aes(Fold, Acc)) + geom_col(fill="#9b59b6", alpha=.85) +
+          geom_hline(yintercept=mean(em$svm_cv_accuracies), linetype="dashed", colour="#e74c3c") +
+          scale_y_continuous(limits=c(0,1), labels=function(x) paste0(x*100,"%")) +
+          labs(title="SVM CV Accuracy", x="Fold", y="Accuracy") + theme_minimal(base_size=12)
+        render_plot(p, fig.width=10, fig.height=5); cat("\n\n")
+      }
+    }
+
+    # Fold accuracies
+    if (!is.null(em$fold_accuracies) && length(em$fold_accuracies)>1) {
+      fdf <- data.frame(Fold=factor(seq_along(em$fold_accuracies)), Acc=em$fold_accuracies)
+      p <- ggplot(fdf, aes(Fold, Acc)) + geom_col(fill="#3498db", alpha=.85) +
+        geom_hline(yintercept=mean(em$fold_accuracies), linetype="dashed", colour="#e74c3c") +
+        scale_y_continuous(limits=c(0,1), labels=function(x) paste0(x*100,"%")) +
+        labs(title=paste0(sig_name," - Per-Fold Accuracy"), x="Fold", y="Accuracy") +
+        theme_minimal(base_size=12)
+      render_plot(p, fig.width=10, fig.height=5); cat("\n\n")
+    }
+
+    # Confusion
+    if (!is.null(em$confusion)) {
+      cat("**Confusion Matrix:**\n\n")
+      print(knitr::kable(as.data.frame.matrix(em$confusion), format="html",
+        table.attr='class="table table-bordered" style="width:auto;"'))
+      cat("\n\n")
+    }
+
+    # ROC
+    if (!is.null(em$roc) && has_proc) {
+      tryCatch({
+        rdf <- data.frame(FPR=1-em$roc$specificities, TPR=em$roc$sensitivities)
+        auc_val <- as.numeric(pROC::auc(em$roc))
+        p <- ggplot(rdf, aes(FPR, TPR)) + geom_line(colour="#e74c3c", linewidth=1.2) +
+          geom_abline(slope=1, intercept=0, linetype="dashed", colour="grey60") +
+          annotate("text", x=.6, y=.3, size=5, fontface="bold", label=sprintf("AUC=%.3f",auc_val)) +
+          labs(title=sprintf("ROC - %s", sig_name), x="1-Specificity", y="Sensitivity") +
+          theme_minimal(base_size=13)
+        render_plot(p, fig.width=8, fig.height=6)
+      }, error=function(e) cat("ROC plot failed.\n"))
+      cat("\n\n")
+    }
+
+    # PCA variance from validation
+    if (!is.null(em$pca_var_pct)) {
+      n_show <- min(10, length(em$pca_var_pct))
+      sdf <- data.frame(PC=seq_len(n_show), V=em$pca_var_pct[seq_len(n_show)])
+      p <- ggplot(sdf, aes(PC, V)) + geom_col(fill="#e67e22", alpha=.8) +
+        geom_line(colour="#e74c3c", linewidth=1) + geom_point(colour="#e74c3c", size=2) +
+        labs(title=sprintf("PCA Variance - %s", sig_name), x="PC", y="Variance (%%)") +
+        scale_x_continuous(breaks=sdf$PC) + theme_minimal(base_size=12)
+      render_plot(p, fig.width=8, fig.height=4); cat("\n\n")
+    }
+  }
+
+  # PCA from beta
+  if (length(cpgs_in_beta)>=3) {
+    cat("### PCA\n\n")
+    bsig <- impute_row_mean(beta[cpgs_in_beta,,drop=FALSE])
+    pca_s <- prcomp(t(bsig), scale.=TRUE, center=TRUE)
+    vp_s <- round(100*pca_s$sdev^2/sum(pca_s$sdev^2), 1)
+    pdf_s <- data.frame(PC1=pca_s$x[,1], PC2=pca_s$x[,2], Group=groups, Sample=colnames(beta))
+    p <- ggplot(pdf_s, aes(PC1, PC2, colour=Group, label=Sample)) +
+      geom_point(size=3.5, alpha=.85) + scale_colour_manual(values=pal) +
+      labs(title=sprintf("PCA - %s (%d CpGs)", sig_name, length(cpgs_in_beta)),
+           x=sprintf("PC1 (%s%%)", vp_s[1]), y=sprintf("PC2 (%s%%)", vp_s[2])) +
+      theme_minimal(base_size=13) + theme(legend.position="bottom")
+    grp_c <- table(groups)
+    if (any(grp_c>=3)) {
+      p <- p + stat_ellipse(level=.95, linetype=2, linewidth=.7, show.legend=FALSE,
+                             data=pdf_s[groups %in% names(grp_c[grp_c>=3]),])
+    }
+    render_plot(p, fig.width=10, fig.height=7); cat("\n\n")
+  } else { cat("### PCA\n\nFewer than 3 CpGs in beta.\n\n") }
+
+  # Heatmap
+  if (length(cpgs_in_beta)>=2) {
+    cat("### Heatmap\n\n")
+    hm_cpgs <- if (length(cpgs_in_beta)>150) cpgs_in_beta[1:150] else cpgs_in_beta
+    bhm <- impute_row_mean(beta[hm_cpgs,,drop=FALSE])
+    annot_c <- data.frame(Group=groups, row.names=colnames(beta))
+    tryCatch({
+      hm <- pheatmap::pheatmap(bhm, scale="row",
+        show_rownames=length(hm_cpgs)<=60, show_colnames=ncol(beta)<=40,
+        annotation_col=annot_c, annotation_colors=list(Group=pal),
+        clustering_method="ward.D2",
+        color=colorRampPalette(c("#3498db","#ecf0f1","#e74c3c"))(100),
+        border_color=NA,
+        fontsize_row=if(length(hm_cpgs)<=30) 7 else 5,
+        fontsize_col=if(ncol(beta)<=20) 9 else 7,
+        main=sprintf("%s - %d CpGs", sig_name, length(hm_cpgs)), silent=TRUE)
+      render_plot(hm$gtable, fig.width=10, fig.height=8)
+    }, error=function(e) cat("Heatmap failed.\n"))
+    cat("\n\n")
+  } else { cat("### Heatmap\n\nFewer than 2 CpGs.\n\n") }
+}
+```
+
+<!-- ================================================================== -->
+<!-- FOOTER                                                              -->
+<!-- ================================================================== -->
+
+---
+
+<div style="text-align:center; color:#999; margin:30px 0;">
+Generated by <strong>mETHYLotest</strong> on `r format(Sys.time(), "%d %B %Y at %H:%M")`
+</div>

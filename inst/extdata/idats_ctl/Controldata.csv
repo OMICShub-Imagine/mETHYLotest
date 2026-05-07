@@ -1,0 +1,6 @@
+"Sample_Name","Sample_Plate","Sample_Group","Sex","GSE_ID","Sample_Status","Mutation_Status","Sentrix_ID","Sentrix_Position","Basename","Tissue","Age","Age_Complete","Origin","Status","Pool_ID","Sample_Well","Disease","Growth_Status","Population (EUR/AFR/EAS)"
+"GSM3024430","EPICv1","abs","M","GSE111165","CTL","abs","200392810139","R02C01","200392810139_R02C01","Blood",7,NA,"DNA Methylation Comparison",NA,NA,NA,"Control","CTL",NA
+"GSM3024426","EPICv1","abs","F","GSE111165","CTL","abs","200392810139","R04C01","200392810139_R04C01","Blood",28,NA,"DNA Methylation Comparison",NA,NA,NA,"Control","CTL",NA
+"GSM3024431","EPICv1","abs","M","GSE111165","CTL","abs","200392810139","R05C01","200392810139_R05C01","Blood",17,NA,"DNA Methylation Comparison",NA,NA,NA,"Control","CTL",NA
+"GSM3024432","EPICv1","abs","F","GSE111165","CTL","abs","200392810139","R06C01","200392810139_R06C01","Blood",14,NA,"DNA Methylation Comparison",NA,NA,NA,"Control","CTL",NA
+"GSM3024436","EPICv1","abs","M","GSE111165","CTL","abs","201501980044","R04C01","201501980044_R04C01","Blood",24,NA,"DNA Methylation Comparison",NA,NA,NA,"Control","CTL",NA

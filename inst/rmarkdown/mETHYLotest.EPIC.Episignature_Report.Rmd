@@ -1,0 +1,335 @@
+---
+title: "mETHYLotest - Episignature Scoring Report"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+    code_folding: hide
+    df_print: paged
+params:
+  rds_file: "episignature_scores.rds"
+---
+
+```{=html}
+<style>
+.score-high  { color: #e74c3c; font-weight: bold; }
+.score-mid   { color: #f39c12; font-weight: bold; }
+.score-low   { color: #27ae60; }
+.metric-row  { display: flex; gap: 15px; margin: 15px 0; }
+.metric-card {
+  flex: 1; text-align: center; padding: 15px;
+  border-radius: 5px; background: #f5f5f5;
+  border: 1px solid #e3e3e3;
+}
+.metric-card .value { font-size: 2em; font-weight: bold; }
+.metric-card .label { color: #666; font-size: 0.9em; }
+.method-box {
+  background: #f8f9fa; border-radius: 5px;
+  border-left: 4px solid #8e44ad; padding: 15px;
+  margin: 15px 0;
+}
+</style>
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width  = 12,
+  fig.height = 7,
+  dpi = 100
+)
+
+library(ggplot2)
+library(plotly)
+library(DT)
+library(htmltools)
+library(knitr)
+
+if (!file.exists(params$rds_file))
+  stop("Results file not found: ", params$rds_file)
+
+df_res <- readRDS(params$rds_file)
+
+samples    <- unique(df_res$Sample)
+signatures <- unique(df_res$Signature)
+```
+
+# Overview
+
+```{r overview_metrics}
+n_samples <- length(samples)
+n_sigs    <- length(signatures)
+top_hit   <- df_res[which.max(df_res$Global_Score), ]
+
+div(class = "metric-row",
+    div(class = "metric-card",
+        div(class = "value", n_samples),
+        div(class = "label", "Samples Scored")),
+    div(class = "metric-card",
+        div(class = "value", n_sigs),
+        div(class = "label", "Episignatures")),
+    div(class = "metric-card",
+        div(class = "value",
+            paste0(top_hit$Global_Score, "%")),
+        div(class = "label",
+            paste0("Top Hit: ", top_hit$Sample,
+                   " x ", top_hit$Signature)))
+)
+```
+
+## Global Heatmap
+
+The heatmap shows the **Global Score** (weighted percentage of significant
+probes relative to the total signature size) for each sample-signature
+combination. Red = strong match.
+
+```{r heatmap, fig.height=max(5, n_sigs * 0.4 + 2), fig.width=max(8, n_samples * 0.8 + 3)}
+mat <- reshape2::acast(df_res, Signature ~ Sample,
+                        value.var = "Global_Score", fill = 0)
+
+p_heat <- plot_ly(
+  z = mat,
+  x = colnames(mat),
+  y = rownames(mat),
+  type = "heatmap",
+  colorscale = list(
+    c(0, "#f7f7f7"), c(0.2, "#fde0dd"),
+    c(0.5, "#fa9fb5"), c(0.8, "#c51b8a"),
+    c(1, "#7a0177")),
+  zmin = 0,
+  zmax = max(mat, 100),
+  hovertemplate = paste0(
+    "Sample: %{x}<br>Signature: %{y}<br>",
+    "Score: %{z:.1f}%<extra></extra>")
+) %>%
+  layout(
+    title = "Episignature Global Score Heatmap",
+    xaxis = list(title = "", tickangle = 45),
+    yaxis = list(title = ""),
+    margin = list(b = 120, l = 150))
+
+p_heat
+```
+
+## Ranking Table
+
+```{r ranking_table}
+rank_df <- df_res[order(-df_res$Global_Score), ]
+rank_df <- rank_df[, c("Sample", "Signature", "Global_Score",
+                         "Pct_Significant", "Coverage_Pct",
+                         "Significant", "Found", "Total_Probes")]
+
+datatable(
+  rank_df,
+  rownames = FALSE,
+  extensions = "Buttons",
+  options = list(
+    pageLength = 20, scrollX = TRUE,
+    dom = "Bfrtip",
+    buttons = c("copy", "csv", "excel"),
+    order = list(list(2, "desc"))),
+  colnames = c("Sample", "Signature", "Global Score (%)",
+               "Significant (%)", "Coverage (%)",
+               "Sig. Probes", "Found", "Total")
+) %>%
+  formatStyle(
+    "Global_Score",
+    background = styleColorBar(
+      c(0, max(rank_df$Global_Score, 1)), "#fa9fb5"),
+    backgroundSize = "98% 88%",
+    backgroundRepeat = "no-repeat",
+    backgroundPosition = "center"
+  ) %>%
+  formatStyle(
+    "Coverage_Pct",
+    background = styleColorBar(c(0, 100), "#a6d8f0"),
+    backgroundSize = "98% 88%",
+    backgroundRepeat = "no-repeat",
+    backgroundPosition = "center"
+  )
+```
+
+---
+
+# Per-Sample Analysis {.tabset .tabset-pills}
+
+```{r per_sample, results='asis'}
+for (sample in samples) {
+
+  cat(paste0("\n\n## ", sample, "\n\n"))
+
+  sub <- df_res[df_res$Sample == sample, ]
+  sub <- sub[order(-sub$Global_Score), ]
+
+  # Metrics
+  n_tested  <- nrow(sub)
+  n_hits    <- sum(sub$Global_Score > 5)
+  top_sig   <- if (nrow(sub) > 0) sub$Signature[1] else "None"
+  top_score <- if (nrow(sub) > 0) sub$Global_Score[1] else 0
+
+  cat('<div class="metric-row">')
+  cat(paste0(
+    '<div class="metric-card">',
+    '<div class="value">', n_tested, '</div>',
+    '<div class="label">Signatures Tested</div></div>'))
+  cat(paste0(
+    '<div class="metric-card">',
+    '<div class="value">', n_hits, '</div>',
+    '<div class="label">Hits (Score > 5%)</div></div>'))
+  cat(paste0(
+    '<div class="metric-card">',
+    '<div class="value">', top_score, '%</div>',
+    '<div class="label">Top: ', top_sig, '</div></div>'))
+  cat('</div>\n\n')
+
+  # Lollipop plot
+  plot_sub <- sub[sub$Global_Score > 0, ]
+  if (nrow(plot_sub) < 5)
+    plot_sub <- head(sub, 20)
+
+  plot_sub$Signature <- factor(
+    plot_sub$Signature,
+    levels = plot_sub$Signature[order(plot_sub$Global_Score)])
+
+  n_items <- nrow(plot_sub)
+  ph <- 400 + n_items * 25
+
+  p <- ggplot(plot_sub,
+              aes(x = Global_Score, y = Signature,
+                  text = paste0(
+                    "<b>", Signature, "</b>",
+                    "<br>Global Score: ", Global_Score, "%",
+                    "<br>Significant: ", Pct_Significant, "%",
+                    "<br>Coverage: ", Coverage_Pct, "%",
+                    "<br>Found: ", Found, "/", Total_Probes))) +
+    geom_segment(aes(x = 0, xend = Global_Score,
+                      y = Signature, yend = Signature),
+                 color = "grey60") +
+    geom_point(aes(color = Global_Score, size = Coverage_Pct)) +
+    scale_color_viridis_c(option = "magma", direction = -1) +
+    scale_size_continuous(range = c(2, 6), name = "Coverage %") +
+    theme_minimal(base_size = 11) +
+    labs(title = paste("Episignature Scores -", sample),
+         x = "Global Score (%)", y = "") +
+    theme(legend.position = "right")
+
+  print(htmltools::tagList(
+    ggplotly(p, tooltip = "text", height = ph)))
+
+  cat("\n\n")
+
+  # Table
+  tbl_cols <- c("Signature", "Global_Score", "Pct_Significant",
+                "Coverage_Pct", "Significant", "Found",
+                "Missing", "Total_Probes")
+  if ("Details" %in% colnames(sub))
+    tbl_cols <- c(tbl_cols, "Details")
+
+  tbl_data <- sub[, intersect(tbl_cols, colnames(sub))]
+  uid <- paste0("tbl_", gsub("[^a-zA-Z0-9]", "_", sample))
+
+  dt <- datatable(
+    tbl_data,
+    rownames  = FALSE,
+    elementId = uid,
+    extensions = "Buttons",
+    options = list(
+      pageLength = 10, scrollX = TRUE,
+      dom = "Bfrtip",
+      buttons = c("copy", "csv"),
+      order = list(list(1, "desc"))),
+    colnames = c("Signature", "Global Score", "% Signif",
+                 "Coverage %", "Sig. Probes", "Found",
+                 "Missing", "Total",
+                 if ("Details" %in% colnames(sub))
+                   "Details")[seq_along(tbl_cols)]
+  ) %>%
+    formatStyle(
+      "Global_Score",
+      background = styleColorBar(
+        c(0, max(sub$Global_Score, 1)), "lightgreen"),
+      backgroundSize = "98% 88%",
+      backgroundRepeat = "no-repeat",
+      backgroundPosition = "center"
+    ) %>%
+    formatStyle(
+      "Pct_Significant",
+      background = styleColorBar(
+        c(0, max(sub$Pct_Significant, 1)), "lightblue"),
+      backgroundSize = "98% 88%",
+      backgroundRepeat = "no-repeat",
+      backgroundPosition = "center"
+    )
+
+  print(htmltools::tagList(dt))
+  cat("\n\n---\n\n")
+}
+```
+
+---
+
+# Methodology
+
+```{r methodology}
+div(class = "method-box",
+    h3("Statistical Approach"),
+
+    h4("1. M-value Transformation"),
+    p("Beta values are converted to M-values for statistical",
+      " normality:"),
+    p(tags$code("M = log2(beta / (1 - beta))")),
+    p("Values are clipped to [0.00001, 0.99999] to avoid",
+      " infinite M-values."),
+
+    h4("2. Z-score Calculation"),
+    p("Each probe's M-value is compared to the internal control",
+      " cohort:"),
+    p(tags$code("Z = (M_patient - mean_controls) / sd_controls")),
+
+    h4("3. Significance"),
+    p("A probe is significant if its two-tailed P-value < 0.05."),
+
+    hr(),
+    h3("Metrics"),
+
+    tags$table(
+      class = "table table-striped",
+      style = "font-size: 13px;",
+      tags$thead(tags$tr(
+        tags$th("Metric"), tags$th("Formula"),
+        tags$th("Interpretation"))),
+      tags$tbody(
+        tags$tr(
+          tags$td(strong("Global Score")),
+          tags$td("Significant / Total_Probes * 100"),
+          tags$td("Most robust. Penalizes missing probes.")),
+        tags$tr(
+          tags$td(strong("% Significant")),
+          tags$td("Significant / Found * 100"),
+          tags$td("Relative to available probes only.")),
+        tags$tr(
+          tags$td(strong("Coverage %")),
+          tags$td("Found / Total_Probes * 100"),
+          tags$td("How much of the signature is present.")),
+        tags$tr(
+          tags$td(strong("Delta Beta")),
+          tags$td("Beta_patient - Mean_Beta_controls"),
+          tags$td("Direction and magnitude of change."))
+      )
+    )
+)
+```
+
+---
+
+# Session Info
+
+```{r session}
+sessionInfo()
+```

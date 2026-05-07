@@ -1,0 +1,622 @@
+---
+title: "mETHYLotest NGS Signature Validation Report"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    code_folding: hide
+    df_print: paged
+params:
+  data_path: "data.rds"
+---
+
+```{=html}
+<style>
+.metric-box {
+  background-color: #f5f5f5;
+  border: 1px solid #e3e3e3;
+  border-radius: 4px;
+  padding: 15px;
+  text-align: center;
+  margin-bottom: 20px;
+}
+.metric-title { font-weight: bold; color: #555; font-size: 1.1em; }
+.metric-value { font-size: 2em; font-weight: bold; margin-top: 5px; }
+.col-blue   { color: #2980b9; }
+.col-green  { color: #27ae60; }
+.col-orange { color: #f39c12; }
+.col-red    { color: #e74c3c; }
+.col-purple { color: #8e44ad; }
+.section-sep { margin-top: 50px; border-top: 2px solid #ddd; padding-top: 20px; }
+.sig-header { background: #f8f9fa; padding: 12px 15px; border-radius: 5px;
+              border-left: 4px solid #2980b9; margin-bottom: 15px; }
+.warn-box { background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px;
+            padding: 12px; margin: 10px 0; }
+.good-box { background: #d5f5e3; border: 1px solid #27ae60; border-radius: 4px;
+            padding: 12px; margin: 10px 0; }
+.bad-box  { background: #fdedec; border: 1px solid #e74c3c; border-radius: 4px;
+            padding: 12px; margin: 10px 0; }
+.info-box { background: #eaf2f8; border: 1px solid #3498db; border-radius: 4px;
+            padding: 12px; margin: 10px 0; }
+.cpg-table { font-size: 0.85em; }
+</style>
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width  = 12,
+  fig.height = 7,
+  dpi = 100
+)
+
+library(ggplot2)
+library(plotly)
+library(caret)
+library(pROC)
+library(htmltools)
+library(knitr)
+
+has_heatmaply <- requireNamespace("heatmaply", quietly = TRUE)
+has_pheatmap  <- requireNamespace("pheatmap",  quietly = TRUE)
+has_cluster   <- requireNamespace("cluster",   quietly = TRUE)
+
+results <- readRDS(params$data_path)
+```
+
+# Validation Overview
+
+This report benchmarks **`r length(results)`** epigenetic signature(s) from **NGS** data:
+
+- **Unsupervised**: PCA and hierarchical clustering to assess natural group separation.
+- **Supervised**: SVM with cross-validation (LOOCV or k-fold) to estimate predictive performance.
+- **Clustering quality**: Silhouette score to quantify separation strength.
+
+Signatures prefixed with `DMC_default_` were generated automatically from significant DMCs
+(top sites by combined score). Other signatures were created manually via the DiffMeth Explorer UI.
+
+Loci are identified by genomic coordinates (`chr:start-end`), not probe IDs.
+
+# Benchmark Summary
+
+```{r benchmark_table}
+bench_rows <- lapply(names(results), function(nm) {
+  r <- results[[nm]]
+  svm_ok <- !is.null(r$svm_model)
+
+  perf <- if (svm_ok) {
+    round(max(r$svm_model$results[[r$metric_used]], na.rm = TRUE), 3)
+  } else { NA }
+
+  metric2_val <- NA
+  metric2_lbl <- "Secondary"
+  if (svm_ok) {
+    if (r$metric_used == "ROC" && "Sens" %in% colnames(r$svm_model$results)) {
+      metric2_val <- round(max(r$svm_model$results$Sens, na.rm = TRUE), 3)
+      metric2_lbl <- "Sensitivity"
+    } else if ("Kappa" %in% colnames(r$svm_model$results)) {
+      metric2_val <- round(max(r$svm_model$results$Kappa, na.rm = TRUE), 3)
+      metric2_lbl <- "Kappa"
+    }
+  }
+
+  # Direct metrics from validate()
+  acc_str <- if (!is.null(r$accuracy) && !is.na(r$accuracy)) {
+    sprintf("%.1f%%", r$accuracy * 100)
+  } else { "N/A" }
+
+  is_default <- grepl("^DMC_default_", nm)
+
+  data.frame(
+    Signature   = nm,
+    Source      = if (is_default) "Auto (DMC)" else "User",
+    CpGs        = r$n_cpgs,
+    Metric      = if (svm_ok) r$metric_used else "N/A",
+    Performance = perf,
+    Accuracy    = acc_str,
+    Secondary   = metric2_val,
+    Silhouette  = round(r$silhouette, 3),
+    stringsAsFactors = FALSE
+  )
+})
+
+bench_df <- do.call(rbind, bench_rows)
+bench_df <- bench_df[order(-bench_df$Performance, na.last = TRUE), ]
+
+knitr::kable(bench_df, row.names = FALSE,
+             caption = "All signatures ranked by primary metric")
+```
+
+```{r benchmark_plot}
+bench_plot <- bench_df[!is.na(bench_df$Performance), ]
+
+if (nrow(bench_plot) > 0) {
+  bench_plot$Signature <- factor(bench_plot$Signature,
+                                  levels = bench_plot$Signature[
+                                    order(bench_plot$Performance)])
+
+  p <- ggplot(bench_plot,
+              aes(x = Signature, y = Performance, fill = Source)) +
+    geom_bar(stat = "identity", alpha = 0.85) +
+    geom_text(aes(label = Performance), hjust = -0.1, size = 3.5) +
+    coord_flip() +
+    scale_fill_manual(values = c("Auto (DMC)" = "#2980b9",
+                                  "User" = "#27ae60")) +
+    labs(title = "Signature Performance Comparison",
+         x = "", y = "Performance (AUC / Accuracy)") +
+    theme_minimal() +
+    ylim(0, max(bench_plot$Performance, na.rm = TRUE) * 1.15)
+
+  ggplotly(p)
+}
+```
+
+```{r silhouette_comparison}
+sil_df <- bench_df[, c("Signature", "Source", "Silhouette")]
+sil_df$Signature <- factor(sil_df$Signature,
+                             levels = sil_df$Signature[order(sil_df$Silhouette)])
+sil_df$Quality <- ifelse(sil_df$Silhouette > 0.5, "Good",
+                  ifelse(sil_df$Silhouette > 0.25, "Weak", "Poor"))
+
+p_sil <- ggplot(sil_df, aes(x = Signature, y = Silhouette, fill = Quality)) +
+  geom_bar(stat = "identity", alpha = 0.85) +
+  geom_text(aes(label = Silhouette), hjust = -0.1, size = 3.5) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", colour = "#27ae60") +
+  geom_hline(yintercept = 0.25, linetype = "dotted", colour = "#f39c12") +
+  coord_flip() +
+  scale_fill_manual(values = c("Good" = "#27ae60", "Weak" = "#f39c12", "Poor" = "#e74c3c")) +
+  labs(title = "Silhouette Score Comparison",
+       x = "", y = "Silhouette") +
+  theme_minimal() +
+  ylim(0, max(sil_df$Silhouette, na.rm = TRUE) * 1.2)
+
+ggplotly(p_sil)
+```
+
+# Individual Signature Reports
+
+```{r individual_reports}
+doc_content <- list()
+
+for (sig_name in names(results)) {
+
+  res    <- results[[sig_name]]
+  svm_ok <- !is.null(res$svm_model)
+  is_default   <- grepl("^DMC_default_", sig_name)
+  source_label <- if (is_default) "Automatic (from DMC)" else "User-created"
+
+  # ── Header ──
+  doc_content[[length(doc_content) + 1]] <- div(class = "section-sep")
+  doc_content[[length(doc_content) + 1]] <- div(
+    class = "sig-header",
+    h2(sig_name, style = "margin:0;"),
+    p(style = "margin:5px 0 0 0; color:#666;",
+      paste0(res$n_cpgs, " CpGs | Source: ", source_label,
+             " | Metric: ", if (svm_ok) res$metric_used else "N/A"))
+  )
+
+  # ── Metrics boxes ──
+  val_m1  <- "FAILED"
+  lbl_m1  <- "SVM Result"
+  val_m2  <- "N/A"
+  lbl_m2  <- "Secondary"
+  css_m1  <- "col-red"
+
+  if (svm_ok) {
+    if (res$metric_used == "ROC") {
+      lbl_m1 <- "AUC (ROC)"
+      val_m1 <- round(max(res$svm_model$results$ROC, na.rm = TRUE), 3)
+      if ("Sens" %in% colnames(res$svm_model$results)) {
+        lbl_m2 <- "Sensitivity"
+        val_m2 <- round(max(res$svm_model$results$Sens, na.rm = TRUE), 3)
+      }
+    } else {
+      lbl_m1 <- "Accuracy"
+      val_m1 <- round(max(res$svm_model$results$Accuracy, na.rm = TRUE), 3)
+      if ("Kappa" %in% colnames(res$svm_model$results)) {
+        lbl_m2 <- "Kappa"
+        val_m2 <- round(max(res$svm_model$results$Kappa, na.rm = TRUE), 3)
+      }
+    }
+    css_m1 <- "col-blue"
+  }
+
+  # Direct accuracy if available
+  val_acc <- "N/A"
+  if (!is.null(res$accuracy) && !is.na(res$accuracy)) {
+    val_acc <- sprintf("%.1f%%", res$accuracy * 100)
+  }
+
+  val_sil <- round(res$silhouette, 3)
+  css_sil <- if (val_sil > 0.5) "col-green"
+             else if (val_sil > 0.25) "col-orange"
+             else "col-red"
+
+  doc_content[[length(doc_content) + 1]] <- div(
+    class = "row",
+    div(class = "col-sm-3",
+        div(class = "metric-box",
+            div(class = "metric-title", lbl_m1),
+            div(class = paste("metric-value", css_m1), val_m1))),
+    div(class = "col-sm-3",
+        div(class = "metric-box",
+            div(class = "metric-title", lbl_m2),
+            div(class = "metric-value col-green", val_m2))),
+    div(class = "col-sm-3",
+        div(class = "metric-box",
+            div(class = "metric-title", "Accuracy"),
+            div(class = "metric-value col-purple", val_acc))),
+    div(class = "col-sm-3",
+        div(class = "metric-box",
+            div(class = "metric-title", "Silhouette"),
+            div(class = paste("metric-value", css_sil), val_sil)))
+  )
+
+  # Silhouette interpretation
+  sil_interp <- if (val_sil > 0.7) list("Strong cluster separation.", "good-box")
+                else if (val_sil > 0.5) list("Reasonable structure.", "info-box")
+                else if (val_sil > 0.25) list("Weak structure.", "warn-box")
+                else list("No substantial structure.", "bad-box")
+
+  doc_content[[length(doc_content) + 1]] <- div(
+    class = sil_interp[[2]],
+    strong(paste0("Silhouette = ", val_sil)),
+    " -- ", sil_interp[[1]]
+  )
+
+  # Confusion matrix (if available directly)
+  if (!is.null(res$confusion)) {
+    doc_content[[length(doc_content) + 1]] <- div(
+      class = "info-box",
+      strong("Confusion Matrix (from CV predictions):"),
+      br(),
+      tags$table(
+        class = "table table-bordered",
+        style = "width:auto; margin-top:8px;",
+        tags$thead(tags$tr(
+          tags$th(""),
+          lapply(colnames(res$confusion), tags$th)
+        )),
+        tagList(lapply(seq_len(nrow(res$confusion)), function(i) {
+          tags$tr(
+            tags$td(strong(rownames(res$confusion)[i])),
+            tagList(lapply(seq_len(ncol(res$confusion)), function(j) {
+              tags$td(res$confusion[i, j])
+            }))
+          )
+        }))
+      )
+    )
+  }
+
+  # ── 1. PCA ──
+  doc_content[[length(doc_content) + 1]] <- h3("1. PCA (Unsupervised Separation)")
+
+  if (!is.null(res$pca)) {
+    pca    <- res$pca
+    df_pca <- data.frame(
+      PC1    = pca$x[, 1],
+      PC2    = pca$x[, 2],
+      Group  = res$raw_data$Class,
+      Sample = rownames(res$raw_data))
+    ve <- round(summary(pca)$importance[2, 1:2] * 100, 1)
+
+    p_pca <- ggplot(df_pca, aes(x = PC1, y = PC2,
+                                 color = Group, text = Sample)) +
+      geom_point(size = 3, alpha = 0.8) +
+      stat_ellipse(level = 0.95, linetype = "dashed", alpha = 0.4) +
+      labs(x = paste0("PC1 (", ve[1], "%)"),
+           y = paste0("PC2 (", ve[2], "%)"),
+           title = paste0("PCA - ", sig_name)) +
+      theme_minimal() +
+      scale_color_manual(values = c("CTL" = "#3498db", "Test" = "#e74c3c"))
+
+    doc_content[[length(doc_content) + 1]] <- ggplotly(p_pca, tooltip = "text")
+
+    # Scree plot
+    ve_all  <- summary(pca)$importance[2, ] * 100
+    n_show  <- min(10, length(ve_all))
+    df_scree <- data.frame(PC = seq_len(n_show), Var = ve_all[seq_len(n_show)])
+
+    p_scree <- ggplot(df_scree, aes(PC, Var)) +
+      geom_col(fill = "#2980b9", alpha = 0.8) +
+      geom_line(colour = "#e74c3c", linewidth = 1) +
+      geom_point(colour = "#e74c3c", size = 2) +
+      scale_x_continuous(breaks = df_scree$PC) +
+      labs(title = "Scree Plot", x = "PC", y = "Variance (%)") +
+      theme_minimal()
+
+    doc_content[[length(doc_content) + 1]] <- ggplotly(p_scree)
+
+  } else {
+    doc_content[[length(doc_content) + 1]] <- p("PCA unavailable for this signature.")
+  }
+
+  # ── 2. Heatmap ──
+  doc_content[[length(doc_content) + 1]] <- h3("2. Hierarchical Clustering")
+
+  if (!is.null(res$beta_matrix)) {
+    bm <- res$beta_matrix
+    # Limit for heatmaply performance
+    if (nrow(bm) > 200) {
+      rv <- apply(bm, 1, var, na.rm = TRUE)
+      bm <- bm[order(rv, decreasing = TRUE)[1:200], , drop = FALSE]
+    }
+
+    annot_col <- data.frame(Group = res$raw_data$Class)
+    rownames(annot_col) <- rownames(res$raw_data)
+
+    if (has_heatmaply) {
+      p_heat <- tryCatch({
+        heatmaply::heatmaply(
+          bm,
+          limits          = c(0, 1),
+          colors          = colorRampPalette(c("#2980b9", "white", "#c0392b"))(100),
+          col_side_colors = annot_col,
+          row_dend_left   = TRUE,
+          col_dend_top    = TRUE,
+          branches_lwd    = 0.2,
+          labRow = if (nrow(bm) > 50) NULL else rownames(bm),
+          main   = paste0("Methylation - ", nrow(bm), " CpGs"),
+          xlab   = "Samples",
+          ylab   = "CpG Loci"
+        )
+      }, error = function(e) NULL)
+
+      if (!is.null(p_heat)) {
+        doc_content[[length(doc_content) + 1]] <- p_heat
+      } else {
+        doc_content[[length(doc_content) + 1]] <- p("Heatmap rendering failed.")
+      }
+    } else {
+      doc_content[[length(doc_content) + 1]] <- p("heatmaply package not installed.")
+    }
+  } else {
+    doc_content[[length(doc_content) + 1]] <- p("Beta matrix not available.")
+  }
+
+  # ── 3. SVM Performance ──
+  doc_content[[length(doc_content) + 1]] <- h3("3. SVM Performance")
+
+  if (!svm_ok) {
+    doc_content[[length(doc_content) + 1]] <- div(
+      class = "warn-box",
+      strong("SVM analysis not possible."),
+      br(),
+      "Sample size too small or classes too unbalanced.",
+      " Rely on PCA and Heatmap for qualitative assessment."
+    )
+  } else {
+    # Confusion matrix plot
+    preds <- res$svm_model$pred
+    cm_plot <- NULL
+    if (!is.null(preds)) {
+      if ("C" %in% colnames(preds) && !is.null(res$svm_model$bestTune$C)) {
+        preds <- preds[preds$C == res$svm_model$bestTune$C, ]
+      }
+      if (nrow(preds) > 0) {
+        cm    <- confusionMatrix(preds$pred, preds$obs)
+        df_cm <- as.data.frame(cm$table)
+
+        cm_plot <- ggplot(df_cm, aes(x = Reference, y = Prediction, fill = Freq)) +
+          geom_tile() +
+          geom_text(aes(label = Freq), size = 6, color = "white") +
+          scale_fill_gradient(low = "#868e96", high = "#2980b9") +
+          labs(title = "Confusion Matrix") +
+          theme_minimal()
+      }
+    }
+
+    # ROC
+    p_roc <- NULL
+    if (res$metric_used == "ROC" && !is.null(preds) && nrow(preds) > 0) {
+      lvls <- levels(preds$obs)
+      if (length(lvls) >= 2 && lvls[1] %in% colnames(preds)) {
+        roc_obj <- tryCatch(
+          pROC::roc(preds$obs, preds[[lvls[1]]]),
+          error = function(e) NULL)
+
+        if (!is.null(roc_obj)) {
+          roc_df  <- data.frame(
+            Specificity = roc_obj$specificities,
+            Sensitivity = roc_obj$sensitivities)
+          auc_val <- round(roc_obj$auc, 3)
+
+          p_roc <- ggplot(roc_df,
+                          aes(x = 1 - Specificity, y = Sensitivity)) +
+            geom_line(color = "#e74c3c", linewidth = 1) +
+            geom_abline(intercept = 0, slope = 1,
+                        linetype = "dashed", color = "grey") +
+            labs(title = paste0("ROC Curve (AUC = ", auc_val, ")")) +
+            theme_minimal()
+        }
+      }
+    }
+
+    if (is.null(p_roc)) {
+      p_roc <- ggplot() +
+        annotate("text", x = 0.5, y = 0.5,
+                 label = "ROC unavailable (Accuracy mode)") +
+        theme_void()
+    }
+
+    if (is.null(cm_plot)) {
+      cm_plot <- ggplot() +
+        annotate("text", x = 0.5, y = 0.5,
+                 label = "Confusion matrix unavailable") +
+        theme_void()
+    }
+
+    doc_content[[length(doc_content) + 1]] <- div(
+      class = "row",
+      div(class = "col-sm-6", ggplotly(cm_plot)),
+      div(class = "col-sm-6", ggplotly(p_roc))
+    )
+  }
+
+  # ── 4. Variable Importance ──
+  doc_content[[length(doc_content) + 1]] <- h3("4. Top Discriminative Loci")
+
+  if (!svm_ok) {
+    doc_content[[length(doc_content) + 1]] <- p(
+      "Requires a valid SVM model. See above.")
+  } else {
+    imp_obj <- tryCatch(
+      varImp(res$svm_model, scale = FALSE),
+      error = function(e) NULL)
+
+    if (!is.null(imp_obj) && nrow(imp_obj$importance) > 0) {
+      imp <- imp_obj$importance
+
+      imp$Score <- if ("Overall" %in% colnames(imp)) imp$Overall
+                   else apply(imp, 1, max)
+
+      imp$RawName <- rownames(imp)
+      known <- names(res$genes_map)
+
+      # Recover locus names (caret mangles chr:start-end)
+      recover_name <- function(x) {
+        if (x %in% known) return(x)
+        # caret: "chr1.12345.12345" or "X.chr1.12345.12345"
+        x2 <- gsub("\\.", ":", x)
+        x2 <- sub(":([0-9]+):([0-9]+)$", ":\\1-\\2", x2)
+        if (x2 %in% known) return(x2)
+        x3 <- gsub("^X:", "", x2)
+        if (x3 %in% known) return(x3)
+        x3 <- gsub("^X", "", x)
+        x3 <- gsub("\\.", ":", x3)
+        x3 <- sub(":([0-9]+):([0-9]+)$", ":\\1-\\2", x3)
+        if (x3 %in% known) return(x3)
+        return(x)
+      }
+      imp$Locus <- vapply(imp$RawName, recover_name, character(1))
+
+      # Parse chr:start for display
+      parts <- strsplit(imp$Locus, "[:|-]")
+      imp$Chr   <- sapply(parts, function(x) if (length(x) >= 1) x[1] else "?")
+      imp$Start <- sapply(parts, function(x) if (length(x) >= 2) x[2] else "?")
+
+      imp$Label <- imp$Locus
+
+      plot_data <- imp[order(imp$Score, decreasing = TRUE), ]
+      plot_data <- head(plot_data, 20)
+      plot_data$Label <- factor(plot_data$Label,
+                                levels = rev(plot_data$Label))
+
+      p_imp <- ggplot(plot_data, aes(x = Label, y = Score)) +
+        geom_bar(stat = "identity", fill = "#c0392b", alpha = 0.8) +
+        coord_flip() +
+        labs(title = "Top 20 Discriminative Loci",
+             x = "", y = "Variable Importance") +
+        theme_minimal() +
+        theme(axis.text.y = element_text(size = 9))
+
+      doc_content[[length(doc_content) + 1]] <- ggplotly(p_imp)
+
+      # Table
+      tbl_data <- plot_data[, c("Locus", "Chr", "Start", "Score")]
+      tbl_data$Score <- round(tbl_data$Score, 4)
+      tbl_data$Rank  <- seq_len(nrow(tbl_data))
+      tbl_data <- tbl_data[, c("Rank", "Locus", "Chr", "Start", "Score")]
+
+      doc_content[[length(doc_content) + 1]] <- div(
+        style = "margin-top:15px;",
+        HTML(kable(tbl_data, row.names = FALSE,
+              format = "html",
+              table.attr = 'class="table table-striped cpg-table"'))
+      )
+
+    } else {
+      doc_content[[length(doc_content) + 1]] <- p(
+        "Variable importance could not be calculated.")
+    }
+  }
+
+  # ── 5. CpG Locus Details ──
+  doc_content[[length(doc_content) + 1]] <- h3("5. CpG Locus Details")
+
+  if (!is.null(res$beta_matrix)) {
+    bm <- res$beta_matrix
+    groups <- res$raw_data$Class
+    grp_levels <- levels(groups)
+
+    detail <- data.frame(Locus = rownames(bm), stringsAsFactors = FALSE)
+
+    for (g in grp_levels) {
+      cols <- which(groups == g)
+      if (length(cols) > 1) {
+        detail[[paste0("Mean_", g)]] <- round(rowMeans(bm[, cols, drop = FALSE], na.rm = TRUE), 4)
+        detail[[paste0("SD_", g)]]   <- round(apply(bm[, cols, drop = FALSE], 1, sd, na.rm = TRUE), 4)
+      } else if (length(cols) == 1) {
+        detail[[paste0("Mean_", g)]] <- round(bm[, cols], 4)
+        detail[[paste0("SD_", g)]]   <- NA
+      }
+    }
+
+    if (length(grp_levels) == 2) {
+      detail$Delta <- round(
+        detail[[paste0("Mean_", grp_levels[2])]] -
+        detail[[paste0("Mean_", grp_levels[1])]], 4)
+      detail <- detail[order(-abs(detail$Delta)), ]
+    }
+
+    # Parse coordinates
+    parts <- strsplit(detail$Locus, "[:|-]")
+    detail$Chr   <- sapply(parts, function(x) x[1])
+    detail$Start <- as.integer(sapply(parts, function(x) if (length(x) >= 2) x[2] else NA))
+
+    # Show top 50
+    detail_show <- head(detail, 50)
+
+    doc_content[[length(doc_content) + 1]] <- div(
+      class = "info-box",
+      paste0("Showing top ", nrow(detail_show), " of ", nrow(detail),
+             " loci (sorted by |Delta|).")
+    )
+
+    doc_content[[length(doc_content) + 1]] <- div(
+      HTML(kable(detail_show, row.names = FALSE,
+            format = "html",
+            table.attr = 'class="table table-striped table-condensed cpg-table"'))
+    )
+  } else {
+    doc_content[[length(doc_content) + 1]] <- p("Beta matrix not available.")
+  }
+
+  # ── Fold Accuracies ──
+  if (!is.null(res$fold_accuracies) && length(res$fold_accuracies) > 1) {
+    doc_content[[length(doc_content) + 1]] <- h3("6. Per-Fold Accuracy")
+
+    fdf <- data.frame(
+      Fold = factor(seq_along(res$fold_accuracies)),
+      Accuracy = res$fold_accuracies)
+
+    p_fold <- ggplot(fdf, aes(Fold, Accuracy)) +
+      geom_col(fill = "#3498db", alpha = 0.85) +
+      geom_hline(yintercept = mean(res$fold_accuracies), linetype = "dashed",
+                 colour = "#e74c3c", linewidth = 0.8) +
+      scale_y_continuous(limits = c(0, 1),
+                         labels = function(x) paste0(x*100, "%")) +
+      labs(title = paste0(sig_name, " - Per-Fold Accuracy"),
+           x = "Fold", y = "Accuracy") +
+      theme_minimal()
+
+    doc_content[[length(doc_content) + 1]] <- ggplotly(p_fold)
+  }
+
+  doc_content[[length(doc_content) + 1]] <- hr()
+}
+
+tagList(doc_content)
+```
+
+# Session Info
+
+```{r session}
+sessionInfo()
+```

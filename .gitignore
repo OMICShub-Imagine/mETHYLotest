@@ -1,0 +1,22 @@
+# --- Fichiers d'historique et de données R ---
+.Rhistory
+.RData
+.Rapp.history
+
+# --- Fichiers spécifiques à RStudio ---
+# On garde le .Rproj, mais pas les dossiers de session utilisateur
+.Rproj.user/
+mETHYLotest.Rproj
+
+# --- Fichiers de compilation (si vous avez du C/C++/Fortran) ---
+src/*.o
+src/*.so
+src/*.dll
+
+# --- Fichiers de construction de package ---
+# Si vous générez des archives .tar.gz ou des dossiers de vérification
+/*.Rcheck/
+*.tar.gz
+
+# --- Divers ---
+.DS_Store

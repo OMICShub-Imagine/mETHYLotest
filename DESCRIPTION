@@ -1,0 +1,99 @@
+Package: mETHYLotest
+Type: Package
+Title: mETHYLotest: a unified toolkit for reproducible multi-platform DNA methylation analysis
+Version: 1.0.0
+Date: 2026-05-07
+Authors@R: c(
+    person(
+      "Nicolas", "Doldi",
+      email = "nicolas.doldi@institutimagine.org",
+      role = c("aut", "cre"),
+      comment = c(ORCID = "0009-0000-2816-9543",
+                  affiliation = "Bioinformatics Core, SFR Necker - Institut Imagine, INSERM U1163, Paris, France")
+    ),
+    person(
+      "Patrick", "Nitschke",
+      role = "ctb",
+      comment = c(affiliation = "Bioinformatics Core, SFR Necker - Institut Imagine, INSERM U1163, Paris, France")
+    ),
+    person(
+      "Maud", "de Dieuleveult",
+      role = "ctb",
+      comment = c(affiliation = "INSERM U1163, Universite de Paris, Imagine Institute, Paris, France")
+    ),
+    person(
+      "Maria Emilia", "Puig Lombardi",
+      role = "ths",
+      comment = c(affiliation = "Bioinformatics Core, SFR Necker - Institut Imagine, INSERM U1163, Paris, France")
+    )
+  )
+Description: mETHYLotest provides interactive Shiny-based pipelines for DNA
+    methylation analysis. The EPIC module wraps ChAMP for Illumina 450K,
+    EPICv1 and EPICv2 arrays with automated QC, normalisation, cell-type
+    correction, batch correction, DMP/DMR detection, signature validation
+    (SVM/PCA/Silhouette) and HTML reporting. The WGBS/Long-Read module wraps
+    methylKit for bisulfite and nanopore/PacBio data with iterative QC,
+    differential methylation, genomic annotation and multi-scenario analysis.
+    An experimental episignature scoring module compares samples against
+    published epigenetic signatures for genetic disorder screening.
+License: GPL (>= 3)
+URL: https://github.com/OMICShub-Imagine/mETHYLotest
+BugReports: https://github.com/OMICShub-Imagine/mETHYLotest/issues
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.3.3
+Depends:
+    R (>= 4.1.0)
+Imports:
+    ChAMP,
+    ChAMPdata,
+    methylKit,
+    shiny,
+    shinydashboard,
+    shinyjs,
+    shinyFiles,
+    shinycssloaders,
+    readxl,
+    writexl,
+    openxlsx,
+    DT,
+    fs,
+    parallel,
+    plotly,
+    ggplot2,
+    ggrepel,
+    heatmaply,
+    chromoMap,
+    tidyr,
+    dplyr,
+    purrr,
+    magrittr,
+    scales,
+    caret,
+    e1071,
+    cluster,
+    pROC,
+    PCAtools,
+    Rtsne,
+    rmarkdown,
+    grDevices,
+    graphics,
+    stats,
+    utils,
+    tools
+Suggests:
+    knitr,
+    annotatr,
+    reshape2,
+    htmltools,
+    IlluminaHumanMethylationEPICanno.ilm10b4.hg19,
+    IlluminaHumanMethylationEPICv2anno.20a1.hg38,
+    IlluminaHumanMethylation450kanno.ilmn12.hg19,
+    FlowSorted.Blood.450k
+biocViews:
+    DNAMethylation,
+    Epigenetics,
+    MethylationArray,
+    QualityControl,
+    DifferentialMethylation,
+    Normalization

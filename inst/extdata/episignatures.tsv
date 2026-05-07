@@ -1,0 +1,126 @@
+Abbreviation	Category	Group	Pathology	Gene/Region	PMID
+Sotos_Sadikovic	SNV	Sotos	Sotos syndrome	NSD1	32109418
+Sotos_Weksberg	SNV	Sotos	Sotos syndrome	NSD1	26690673
+RSTS_1	SNV	RSTS_1	Rubinstein-Taybi syndrome 1 (RSTS1)	CREBBP	35047860
+RSTS_2	SNV	RSTS_2	Rubinstein-Taybi syndrome 2 (RSTS2)	EP300	35047860
+RSTS_1_2	SNV	RSTS_1,RSTS_2	Rubinstein-Taybi syndromes 1,2 (RSTS1,2)	CREBBP, EP300	32109418
+ARTHS	SNV	ARTHS	Arboleda-Tham syndrome (ARTHS)	KAT6A	35047860, 37249
+AKS	SNV	AKS	Au-Kline syndrome	HNRNPK	36130591
+AUTS18	SNV	AUTS18	Autism, susceptibility to, 18 (AUTS18)	CHD8	32109418
+KDM4B	SNV	KDM4B	Autosomal dominant intellectual developmental disorder-65 (MRD65)	KDM4B	35047860
+BCL11B_RD	SNV	BCL11B_RD	BCL11B-related disorder	BCL11B	37860968
+BEFAHRS	SNV	BEFAHRS	Beck-Fahrner syndrome (BEFAHRS)	TET3	35047860
+BOS	SNV	BOS	Bohring-Opitz syndrome	ASXL1, ASXL2, and ASXL3	35361921
+BFLS	SNV	BFLS	Börjeson-Forssman-Lehmann syndrome	PHF6	32109418
+CDK13_RD	SNV	CDK13_RD	CDK13-related disorder	CDK13	35063350
+ADCADN	SNV	ADCADN	Cerebellar ataxia, deafness, and narcolepsy, autosomal dominant	DNMT1	32109418
+CHARGE_Sadikovic	SNV	CHARGE	CHARGE syndrome	CHD7	32109418
+CHARGE_Weksberg	SNV	CHARGE	CHARGE syndrome	CHD7	28475860
+DIDOD	SNV	DIDOD	Chung-Jansen syndrome	PHIP	38787418
+CBS	SNV	CBS	Clark-Baraitser syndrome	TRIP12	36430143
+CdLS	SNV	CdLS	Cornelia de Lange syndromes 1,2,3,4	NIPBL, SMC1A, SMC3, RAD21	32109418
+CUL3	SNV	CUL3	Neurodevelopmental disorder with or without autism or seizures 	CUL3	39501558
+DMD	SNV	DMD	Duchenne muscular dystrophy	DMD	36572586
+EEOC_Sadikovic	SNV	EEOC	Epileptic encephalopathy, childhood-onset	CHD2	32109418
+EEOC_Sadikovic_refine	SNV	EEOC	Epileptic encephalopathy, childhood-onset	CHD2	39107278
+FA	SNV	FA	Fanconi anemia	FANCA	37865086
+GADEVS	SNV	GADEVS	Gabriele-de Vries syndrome (GADEVS)	YY1	35047860
+HAFOUS	SNV	HAFOUS	Hao-Fountain syndrome	USP7	38126281
+HNRNPU_RND	SNV	HNRNPU_RND	HNRNPU haploinsufficiency	HNRNPU	37120726
+IDDSELD	SNV	IDDSELD	Intellectual developmental disorder with seizures and language delay (IDDSELD)	SETD1B	32109418
+IDD21	SNV	IDD21	Intellectual developmental disorder, autosomal dominant 21	CTCF	38054406
+JARID2_NDS	SNV	JARID2_NDS	JARID2-neurodevelopmental syndrome	JARID2	35887345
+Kabuki_Sadikovic	SNV	Kabuki	Kabuki syndromes 1,2	KMT2D, KDM6A	32109418
+Kabuki_Weksberg	SNV	Kabuki	Kabuki syndromes 1,2	KMT2D	28475860
+KBHNS	SNV	KBHNS	Karayol-Borroto-Haghshenas neurodevelopmental syndrome	MSL2	38815585
+KBG	SNV	KBG	KBG syndrome	ANKRD11	36440975
+LLS	SNV	LLS	Luscan-Lumish syndrome (LLS)	SETD2	35047860
+MRD23	SNV	MRD23	Mental retardation, autosomal dominant 23 (MRD23)	SETD5	
+MRD51	SNV	MRD51	Mental retardation, autosomal dominant 51	KMT5B	32109418
+TWIN	SNV	TWIN	Monozygotic (MZ) twins		34584077
+MOWS	SNV	MOWS	Mowat-Wilson	ZEB2	38351292
+MLASA2	SNV	MLASA2	Myopathy, lactic acidosis, and sideroblastic anemia 2 (MLASA2)	YARS2	35047860
+SHANK3	SNV	SHANK3	Phelan-McDermid syndrome	SHANK3	33407854
+PTHS	SNV	PTHS	Pitt-Hopkins syndrome	TCF4	38571311
+RMNS	SNV	RMNS	Rahman syndrome	H1-4 (HIST1H1E)	32109418
+RCEM	SNV	RCEM	Recurrent constellations of embryonic malformations	VACTERL, OAVS, CHARGE-like	39089258
+RENS1	SNV	RENS1	Renpenning syndrome (RENS1)	PQBP1	35047860
+MKHK_ID4a	SNV	MKHK_ID4a	Menke-Hennekam syndromes 1,2 (MKHK1,2)	CREBBP, EP300	35047860
+TBRS	SNV	TBRS	Tatton-Brown-Rahman syndrome	DNMT3A	32109418
+WDSTS_Sadikovic	SNV	WDSTS	Wiedemann-Steiner syndrome	KMT2A	32109418
+WDSTS_Lebre	SNV	WDSTS	Wiedemann-Steiner syndrome	KMT2A	35163737
+WITKOS	SNV	WITKOS	Witteveen-Kolk syndrome	SIN3A	36399132
+WHS	SNV	WHS	Wolf–Hirschhorn syndrome (WHS)	NSD2	36589751
+ATRX	SNV	ATRX	X-linked alpha-thalassemia/mental retardation syndrome (ATRX)	ATRX	32109418
+KMT2C	SNV	KMT2C	KMT2C-related NDD (non-Kabuki, non-Kleefstra)	KMT2C	39013459
+KDVS_Sadikovic	SNV	KDVS	Koolen de Vreis syndrome	KANSL1	32109418
+KDVS_Weksberg	SNV	KDVS	Koolen de Vreis syndrome	KANSL1	38282074
+DYT28_Oexle	SNV	DYT28	KMT2B-related dystonia	KMT2B	34590685
+DYT28_Sadikovic	SNV	DYT28	Dystonia 28, childhood-onset (DYT28)	KMT2B	35047860
+DYRK1A	SNV	DYRK1A	Intellectual developmental disorder, autosomal dominant 7	DYRK1A	34345024
+Kleefstra_Sadikovic	SNV	Kleefstra	Kleefstra syndrome 1 (KLEFS1)	EHMT1, EHMT2	32109418
+Kleefstra_Weksberg	SNV	Kleefstra	Kleefstra syndrome 1 (KLEFS1)	EHMT1	10.20517/jtgg.2020.23
+KDM2B_RS	SNV	KDM2B	KDM2B-related syndrome	KDM2B	35047860
+KDM2B_CxxC	SNV	KDM2B	KDM2B-related syndrome	KDM2B_CxxC domain	36322151
+MRX93	SNV	MRX93	Intellectual developmental disorder, X-linked 93 (MRX93)	BRWD3	32109418
+MRX97	SNV	MRX97	Intellectual developmental disorder, X-linked 97 (MRX97)	ZNF711	32109418
+MRXSN	SNV	MRXSN	Intellectual developmental disorder, X-linked syndromic, Nascimento-type (MRXSN)	UBE2A	32109418
+MRXSSR	SNV	MRXSSR	Intellectual developmental disorder, X-linked, Snyder-Robinson type (MRXSSR)	SMS	32109418
+MRXSA_Schwartz	SNV	MRXSA_Schwartz	intellectual developmental disorder, X-linked, syndromic, Armfield type	FAM50A	33498634
+MRXSA_Sadikovic	SNV	MRXSA_Sadikovic	Intellectual developmental disorder, X-linked, syndromic, Armfield type (MRXSA)	FAM50A	35047860
+MRXSCJ_Sadikovic	SNV	MRXSCJ	Intellectual developmental disorder, X-linked, syndromic, Claes-Jensen type (MRXSCJ)	KDM5C	32109418
+MRXSCJ_Weksberg	SNV	MRXSCJ	Intellectual developmental disorder, X-linked, syndromic, Claes-Jensen type (MRXSCJ)	KDM5C	23356856
+ICF_1	SNV	ICF_1	Immunodeficiency-centromeric instability-facial anomalies syndrome 1 (ICF1)	DNMT3B	32109418
+ICF2_3_4	SNV	ICF2_3_4	Immunodeficiency-centromeric instability-facial anomalies syndromes 2,3,4 (ICF2,3,4)	ZBTB24,CDCA7,HELLS	32109418
+HVDAS_C_Sadikovic	SNV	HVDAS_C	Helsmoortel-Van der Aa syndrome (central)	ADNP_central-c.2000-2340	32109418
+HVDAS_T_Sadikovic	SNV	HVDAS_T	Helsmoortel-Van der Aa syndrome (5′ and 3′ terminal ends)	ADNP_terminal	32109418
+HVDAS_C_De_Rubeis	SNV	HVDAS_C	Helsmoortel-Van der Aa syndrome (HVDAS)	ADNP_central-c.2000-2340	32758449
+HVDAS_T_De_Rubeis	SNV	HVDAS_T	Helsmoortel-Van der Aa syndrome (HVDAS)	ADNP_terminal	32758449
+KAT6B_GTPTS	SNV	GTPTS-SBBYSS	Genitopatellar syndrome (GTPTS)	KAT6B	32109418
+KAT6B_SBBYSS	SNV	GTPTS-SBBYSS	Ohdo syndrome, SBBYSS variant (SBBYSS)	KAT6B	32109418
+KAT6B_GTPTS_SBBYSS	SNV	GTPTS-SBBYSS	Genitopatellar syndrome (GTPTS) and Ohdo syndrome, SBBYSS variant (SBBYSS)	KAT6B	37249002
+FHS_Sadikovic	SNV	FHS_truncating	Floating-Harbor syndrome	SRCAP_Truncating-E33-E34	32109418, 27934915
+FHS_Weksberg	SNV	FHS_truncating	Floating-Harbor syndrome	SRCAP_Truncating-E33-E34	33909990
+non_FLHS_Weksberg_prox	SNV	FHS_truncating_prox	Floating-Harbor syndrome (non-FLHS SRCAP-associated NDD)	SRCAP_Truncating-prox	33909990
+non_FLHS_Weksberg_missense	SNV	FHS_missense	Floating-Harbor syndrome (non-FLHS SRCAP-associated NDD)	SRCAP_missense	37340855
+PRC2	SNV	PRC2	Cohen-Gibson syndrome (COGIS), Weaver syndrome (WVS)	EZH2, EED, SUZ12	32243864
+CSS_1_2_c.6200	SNV	CSS	Coffin-Siris syndrome-1,2 (CSS1,2)	ARID1B, ARID1A	35047860
+CSS_1_2_3_4_NCBRS	SNV	CSS	Coffin-Siris syndrome-1,2,3,4 (CSS1,2,3,4) and Nicolaides-Baraitser (NCBRS) syndromes (SMARCA2)	ARID1A, ARID1B, SMARCB1, SMARCA4, SMARCA2	32109418
+CSS_4_c.2656	SNV	CSS4_c.2656	Coffin-Siris syndrome-4 (CSS4)	SMARCA4	35047860, 3588721
+CSS_9	SNV	CSS9	Coffin-Siris syndrome-9 (CSS9)	SOX11	35047860
+CSS_1_DUP	SNV	CSS	Coffin-Siris syndrome-1,2 (CSS1,2)	ARID1B	39355979
+CSS_2_DUP	SNV	CSS	Coffin-Siris syndrome-1,2 (CSS1,2)	ARID1A	39355979
+BISS_HVDAS	SNV	BISS	Blepharophimosis Intellectual disability and Helsmoortel-Van Der Aa Syndrome	SMARCA2	38884529
+BISS	SNV	BISS	Blepharophimosis Intellectual disability SMARCA2 syndrome	SMARCA2	32694869
+SRSF1	SNV	SRSF1	Neurodevelopmental disorder with dysmorphic facies and behavioral abnormalities	SRSF1	37071997
+Valproic_Acid	SNV	Valproic_Acid	Antenatal exposure to Valproic acid	NA	39097820
+PURA	SNV	PURA	Neurodevelopmental disorder with neonatal respiratory insufficiency, hypotonia, and feeding difficulties	PURA	38770750
+4p16del	CNV	4p16del	4p16del	NSD2, CTBP1, SLBP, CTBP1, PCGF3	35047860, 33547396
+7q11.23del_Weksberg	CNV	7q11.23del	Williams-Beuren deletion syndrome (WBS)	METTL27, BUD23, BCL7B, BAZ1B	26166478
+7q11.23dup_Weksberg	CNV	7q11.23dup	Williams-Beuren duplication syndrome (WBS)	METTL27, BUD23, BCL7B, BAZ1B	26166478
+7q11.23del_Sadikovic	CNV	7q11.23del	Williams-Beuren deletion syndrome (WBS)	Chr7q11.23 deletion	32109418
+7q11.23dup_Sadikovic	CNV	7q11.23dup	Williams-Beuren duplication syndrome (WBS)	Chr7q11.23 duplication	32109418
+22q13.3del	CNV	22q13.3del	Phelan-McDermid syndrome (PHMDS)	Overlap region: BRD1	35047860, 33407854
+SPEN	SNV	SPEN	Radio-Tartaglia Syndrome	SPEN	33596411
+1p36del	CNV	1p36del	1p36del	SPEN	33596411
+5p15	CNV	5p15	Cri du chat syndrome	ATPSCKMT, MTRR, NSUN2, LPCAT1, BRD9	36242045
+5q35del	CNV	5q35del	Sotos	NSD1	26690673
+5q35dup	CNV	5q35	Hunter McAlpine craniosynostosis syndrome	NSD1	32109418
+6p22_p24	CNV	6p22-p24	JARID2-neurodevelopmental syndrome	JARID2	37762546
+9q34.3	CNV	9q34.3	Kleefstra syndrome 1 (KLEFS1)	EHMT1	10.20517/jtgg.2020.23
+12q24.31	CNV	12q24.31	12q24.31 microdeletion syndrome	KDM2B_CxxC domain	36322151
+16q24.3del	CNV	16q24.3del	16q24.3del	ANKRD11	36440975
+21trisomy	CNV	21q	Down syndrome		32109418
+17q21.31del	CNV	17q21.31	Koolen de Vreis syndrome	KANSL1	38282074
+22q11.2del	CNV	22q11.2del	22q11.2 deletion syndrome	THAP7, TRMT2A, COMT, HIRA	34445317
+22q11.2VCFS	CNV	22q11.2VCFS	Velocardiofacial syndrome (VCFS)		35047860
+16p11.2_del_Sadikovic	CNV	16p11.2del	16p11.2 deletion syndrome, 593-KB		35047860
+16p11.2_del_Weksberg	CNV	16p11.2del	16p11.2 deletion syndrome, 593-KB		31311581
+ReNU	SNV	RNU4-2	ReNU Syndrome	RNU4-2	40379786
+CHD3	SNV	CHD3	Snijders Blok-Campeau syndrome	CHD3	10.21203/rs.3.rs-6706576/v1
+ARID2	SNV	ARID2	ARID2-RD	ARID2	40044822
+ZNF142	SNV	ZNF142	Biallelic loss-of-function variants in ZNF142	ZNF142	40410387
+MORC2	SNV	MORC2	Leigh Syndrome	MORC2	40302207
+CHD4-final-classifier	SNV	SIHIWES	Sifrim-Hitz-Weiss syndrome	CHD4	39824190
+CHD4-missenseATPase-helicasedomain	SNV	SIHIWES	Sifrim-Hitz-Weiss syndrome, missense ATPase/Helicase domain	CHD4	39824190
+CHD4-truncating-recurrentmissense	SNV	SIHIWES	Sifrim-Hitz-Weiss syndrome, truncating-recurrent missense	CHD4	39824190

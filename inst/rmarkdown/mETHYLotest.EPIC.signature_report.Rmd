@@ -1,0 +1,592 @@
+---
+title: "DMP Signature Report"
+date: "`r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+output:
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    code_folding: hide
+    df_print: paged
+params:
+  data_path: "data.rds"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 12,
+  fig.height = 8,
+  dpi = 100
+)
+
+# Load required libraries
+library(ggplot2)
+library(plotly)
+library(DT)
+library(knitr)
+library(dplyr)
+library(chromoMap)
+library(heatmaply)
+library(tidyr)
+library(scales)
+
+# Load report data
+report_data <- readRDS(params$data_path)
+
+# Extract data
+signature_name  <- report_data$signature_name
+dmp_full        <- report_data$dmp_full
+dmp_sig         <- report_data$dmp_sig
+full_annotation <- report_data$full_annotation
+beta_matrix     <- report_data$beta_matrix
+pheno           <- report_data$pheno
+ages            <- report_data$ages           # <--- NOUVEAU : Récupération Ages
+adjPVal         <- report_data$adjPVal
+top_n_heatmap   <- report_data$top_n_heatmap
+top_n_windows   <- report_data$top_n_windows
+
+# --- DATA CLEANING (Alignement UI) ---
+# S'assurer que P.Value existe (Fallback sur adj.P.Val ou P.Val si manquant)
+if(!"P.Value" %in% colnames(dmp_sig)) {
+  if("P.Val" %in% colnames(dmp_sig)) dmp_sig$P.Value <- dmp_sig$P.Val
+  else dmp_sig$P.Value <- dmp_sig$adj.P.Val
+}
+if(!"P.Value" %in% colnames(dmp_full)) {
+  if("P.Val" %in% colnames(dmp_full)) dmp_full$P.Value <- dmp_full$P.Val
+  else dmp_full$P.Value <- dmp_full$adj.P.Val
+}
+
+# Subsets pour compatibilité
+dmp_hyper <- dmp_sig %>% filter(Status == "Hyper")
+dmp_hypo  <- dmp_sig %>% filter(Status == "Hypo")
+```
+
+---
+
+# DMP Signature Report: `r signature_name`
+
+# Summary Statistics
+
+```{r summary_stats}
+summary_df <- data.frame(
+  Category = c("Total Probes Tested", 
+               "Significant DMPs", 
+               "Hyper-Methylated DMPs", 
+               "Hypo-Methylated DMPs"),
+  Count = c(nrow(dmp_full), 
+            nrow(dmp_sig), 
+            nrow(dmp_hyper), 
+            nrow(dmp_hypo)),
+  Percentage = c("100%",
+                 paste0(round(100 * nrow(dmp_sig) / nrow(dmp_full), 2), "%"),
+                 paste0(round(100 * nrow(dmp_hyper) / nrow(dmp_full), 2), "%"),
+                 paste0(round(100 * nrow(dmp_hypo) / nrow(dmp_full), 2), "%"))
+)
+
+kable(summary_df, caption = paste("Summary (adj.P.Val <", adjPVal, ")"))
+```
+
+## DMP Results Table
+
+```{r dmp_table}
+# Prepare columns like in UI (Ajout de P.Value)
+cols_base <- c("CpG", "deltaBeta", "adj.P.Val", "P.Value", "CHR", "MAPINFO", "gene", "feature", "CGI")
+dmp_display <- dmp_sig %>% select(any_of(cols_base))
+
+# Séparation des colonnes pour le formatage
+cols_pvals <- c('adj.P.Val', 'P.Value')
+cols_betas <- c('deltaBeta')
+
+DT::datatable(
+  dmp_display,
+  caption = "Significant Differentially Methylated Positions",
+  filter = 'top',
+  extensions = 'Buttons',
+  options = list(
+    scrollX = TRUE,
+    pageLength = 25,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel'),
+    order = list(list(which(colnames(dmp_display) == "adj.P.Val"), 'asc'))
+  ),
+  rownames = FALSE
+) %>%
+  # Formatage spécifique : Betas (arrondi), P-values (significatifs)
+  DT::formatRound(columns = cols_betas, digits = 4) %>%
+  DT::formatSignif(columns = cols_pvals, digits = 3) %>%
+  DT::formatStyle('deltaBeta', 
+                  color = DT::styleInterval(0, c('blue', 'red')), 
+                  fontWeight = 'bold')
+```
+
+---
+
+## Volcano Plot & Density
+
+```{r volcano_density, fig.height=6}
+# Recalcul Status sur le Full dataset pour le plot
+# Note: On utilise adjPVal comme seuil principal ici pour la couleur
+dmp_full$Status <- case_when(
+  dmp_full$adj.P.Val < adjPVal & dmp_full$deltaBeta > 0 ~ "Hyper",
+  dmp_full$adj.P.Val < adjPVal & dmp_full$deltaBeta < 0 ~ "Hypo",
+  TRUE ~ "Not Sig"
+)
+
+# Sample non-significant for performance
+df_viz <- bind_rows(
+  dmp_full %>% filter(Status != "Not Sig"),
+  dmp_full %>% filter(Status == "Not Sig") %>% sample_n(min(nrow(.), 5000))
+)
+
+# Volcano Plot (Ajout P.Value au tooltip)
+p_volcano <- plot_ly(
+  data = df_viz,
+  x = ~deltaBeta,
+  y = ~-log10(adj.P.Val),
+  type = 'scatter',
+  mode = 'markers',
+  color = ~Status,
+  colors = c("Hyper" = "#d9534f", "Hypo" = "#0275d8", "Not Sig" = "grey"),
+  text = ~paste("Gene:", gene, 
+                "<br>CpG:", CpG, 
+                "<br>Adj.P:", formatC(adj.P.Val, format = "e", digits = 2),
+                "<br>Raw.P:", formatC(P.Value, format = "e", digits = 2)),
+  marker = list(size = 5, opacity = 0.7)
+) %>%
+  layout(
+    title = "Volcano Plot",
+    xaxis = list(title = "Delta Beta"),
+    yaxis = list(title = "-log10(adj.P.Val)")
+  )
+
+# Density Plot
+df_density <- dmp_full %>% filter(Status != "Not Sig")
+p_density <- ggplot(df_density, aes(x = deltaBeta, fill = Status)) +
+  geom_density(alpha = 0.6) +
+  scale_fill_manual(values = c("Hyper" = "#d9534f", "Hypo" = "#0275d8")) +
+  theme_minimal() +
+  labs(title = "Delta Beta Density", x = "Delta Beta", y = "Density")
+
+# Display side by side
+htmltools::div(
+  style = "display: flex; gap: 20px;",
+  htmltools::div(style = "flex: 1;", p_volcano),
+  htmltools::div(style = "flex: 1;", ggplotly(p_density))
+)
+```
+
+---
+
+## Chromosomes Map (ChromoMap)
+
+```{r chromomap, fig.height=8}
+# Prepare chromosome reference (HG38)
+chr_ref <- data.frame(
+  chrom = c(paste0("chr", 1:22), "chrX", "chrY"),
+  start = 1,
+  end = c(248956422, 242193529, 198295559, 190214555, 181538259, 170805979, 159345973,
+          145138636, 138394717, 133797422, 135086622, 133275309, 114364328, 107043718,
+          101991189, 90338345, 83257441, 80373285, 58617616, 64444167, 46709983,
+          50818468, 156040895, 57227415)
+)
+
+# Prepare annotation data (Only Sig DMPs)
+dmp_sig$CHR_Clean <- paste0("chr", gsub("chr", "", dmp_sig$CHR))
+df_map <- dmp_sig %>% filter(CHR_Clean %in% chr_ref$chrom)
+
+if (nrow(df_map) > 0) {
+  annot_data <- data.frame(
+    Element = df_map$CpG,
+    Chrom   = as.character(df_map$CHR_Clean),
+    Start   = as.numeric(df_map$MAPINFO),
+    End     = as.numeric(df_map$MAPINFO + 1),
+    Data    = as.numeric(df_map$deltaBeta),
+    stringsAsFactors = FALSE
+  )
+  annot_data <- na.omit(annot_data)
+  
+  chromoMap(
+    list(chr_ref),
+    list(annot_data),
+    data_based_color_map = TRUE,
+    data_type = "numeric",
+    data_colors = list(c("blue", "white", "red")),
+    chr_color = c("#d3d3d3"),
+    legend = TRUE,
+    lg_x = 100,
+    lg_y = 100
+  )
+} else {
+  cat("No chromosomal data available for mapping.\n")
+}
+```
+
+---
+
+## Distribution Barplots
+
+### CGI Distribution
+
+```{r barplot_cgi, fig.height=5}
+# Prepare data with "All" category like in UI
+df_hyper_all <- dmp_hyper; df_hyper_all$Status <- "Hyper"
+df_hypo_all <- dmp_hypo; df_hypo_all$Status <- "Hypo"
+df_all <- dmp_sig; df_all$Status <- "All"
+
+df_combined <- bind_rows(df_hyper_all, df_hypo_all, df_all)
+df_combined$Status <- factor(df_combined$Status, levels = c("Hyper", "Hypo", "All"))
+
+p_cgi <- ggplot(df_combined, aes(x = CGI, fill = Status)) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("Hyper" = "#d9534f", "Hypo" = "#0275d8", "All" = "#555555")) +
+  theme_minimal() +
+  labs(title = "Distribution by CGI Context", x = "CGI", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplotly(p_cgi)
+```
+
+### Feature Distribution
+
+```{r barplot_feature, fig.height=5}
+# Order features like in UI
+feat_levels <- c("TSS1500", "TSS200", "5'UTR", "1stExon", "Body", "3'UTR", "IGR")
+present <- intersect(feat_levels, unique(df_combined$feature))
+others <- setdiff(unique(df_combined$feature), feat_levels)
+df_combined$feature <- factor(df_combined$feature, levels = c(present, others))
+
+p_feature <- ggplot(df_combined, aes(x = feature, fill = Status)) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("Hyper" = "#d9534f", "Hypo" = "#0275d8", "All" = "#555555")) +
+  theme_minimal() +
+  labs(title = "Distribution by Genomic Feature", x = "Feature", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplotly(p_feature)
+```
+
+### Chromosomal Distribution
+
+```{r barplot_chr, fig.height=5}
+# Clean chromosome names
+df_combined$CHR_Clean <- gsub("chr", "", df_combined$CHR)
+chr_levels <- c(as.character(1:22), "X", "Y", "M", "MT")
+df_combined$CHR_Factor <- factor(df_combined$CHR_Clean, levels = chr_levels)
+
+df_chr <- df_combined %>% filter(!is.na(CHR_Factor))
+
+p_chr <- ggplot(df_chr, aes(x = CHR_Factor, fill = Status)) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("Hyper" = "#d9534f", "Hypo" = "#0275d8", "All" = "#555555")) +
+  theme_minimal() +
+  labs(title = "Distribution by Chromosome", x = "Chromosome", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplotly(p_chr)
+```
+
+### Feature × CGI Composition
+
+```{r barplot_feature_cgi, fig.height=6}
+p_feat_cgi <- ggplot(dmp_sig, aes(x = feature, fill = CGI)) +
+  geom_bar(position = "fill") +
+  facet_wrap(~Status) +
+  scale_fill_viridis_d() +
+  theme_minimal() +
+  labs(title = "CGI Composition within Features (by Status)", x = "Feature", y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplotly(p_feat_cgi)
+```
+
+---
+
+## Heatmap of Top DMPs
+
+```{r heatmap, fig.height=10}
+# Select top DMPs by absolute delta beta
+dmp_sorted <- dmp_sig[order(abs(dmp_sig$deltaBeta), decreasing = TRUE), ]
+top_cpgs <- head(dmp_sorted$CpG, min(top_n_heatmap, nrow(dmp_sorted)))
+
+# Extract beta values
+beta_heatmap <- beta_matrix[top_cpgs, , drop = FALSE]
+
+if (nrow(beta_heatmap) >= 2) {
+  # Prepare annotation for samples
+  pheno_df <- data.frame(Group = pheno)
+  rownames(pheno_df) <- colnames(beta_heatmap)
+  
+  # Generate heatmap with heatmaply (same as UI)
+  heatmaply::heatmaply(
+    beta_heatmap,
+    limits = c(0, 1),
+    colors = colorRampPalette(c("navy", "white", "firebrick"))(100),
+    row_dend_left = TRUE,
+    col_dend_top = TRUE,
+    branches_lwd = 0.2,
+    labRow = if(length(top_cpgs) > 50) NULL else top_cpgs,
+    labCol = colnames(beta_heatmap),
+    main = paste("Clustering (", length(top_cpgs), "DMPs)")
+  )
+} else {
+  cat("Not enough CpGs for heatmap clustering.\n")
+}
+```
+
+---
+
+## Individual CpG Windows (Genomic Curves)
+
+```{r cpg_windows, echo=FALSE, results='asis'}
+# --- PARAMÈTRES UI-LIKE ---
+window_bp <- 5000 
+
+# 1. RÉCUPÉRATION DE L'ANNOTATION COMPLÈTE (passed via report_data)
+# C'est la différence clé : on utilise l'annotation complète, pas juste les résultats DMPs
+probe_features <- report_data$full_annotation 
+beta_matrix    <- report_data$beta_matrix
+dmp_sig        <- report_data$dmp_sig
+
+# 2. NETTOYAGE PRÉALABLE (Copie exacte de la logique UI)
+# Force MAPINFO en numérique
+if("MAPINFO" %in% colnames(probe_features)) {
+  probe_features$MAPINFO <- as.numeric(as.character(probe_features$MAPINFO))
+}
+# Création/Nettoyage de CHR_Clean
+chr_col <- grep("CHR", colnames(probe_features), ignore.case = TRUE, value = TRUE)[1]
+if(!is.na(chr_col)) {
+  probe_features$CHR_Clean <- gsub("chr", "", as.character(probe_features[[chr_col]]), ignore.case = TRUE)
+}
+# Si CpG n'est pas une colonne
+if(!"CpG" %in% colnames(probe_features)) {
+  probe_features$CpG <- rownames(probe_features)
+}
+
+# 3. SÉLECTION DES CIBLES
+# On prend les X meilleurs DMPs significatifs
+dmp_sorted <- dmp_sig[order(dmp_sig$adj.P.Val), ]
+top_window_cpgs <- head(dmp_sorted$CpG, min(top_n_windows, nrow(dmp_sorted)))
+
+plot_list <- list()
+
+for (i in seq_along(top_window_cpgs)) {
+  target_id <- top_window_cpgs[i]
+  
+  # --- A. Infos de la cible (Depuis l'annotation complète) ---
+  # UI Logic: info <- probe_features[target_id, ]
+  sel_info <- probe_features[probe_features$CpG == target_id, ]
+  
+  if (nrow(sel_info) == 0) next
+  
+  # Récupération propre
+  target_chr  <- as.character(sel_info$CHR_Clean[1])
+  target_pos  <- as.numeric(sel_info$MAPINFO[1])
+  target_gene <- if("gene" %in% colnames(sel_info)) sel_info$gene[1] else ""
+  
+  # Fenêtre
+  w_start <- target_pos - window_bp
+  w_end   <- target_pos + window_bp
+  
+  # --- B. Recherche des voisins (LOGIQUE UI EXACTE) ---
+  # UI Logic: filter(CHR_Clean == ..., MAPINFO >= ..., MAPINFO <= ...)
+  neighbors <- probe_features %>%
+    filter(CHR_Clean == target_chr, 
+           MAPINFO >= w_start, 
+           MAPINFO <= w_end) %>%
+    arrange(MAPINFO)
+  
+  # --- C. Intersection avec Beta ---
+  # On vérifie quels voisins existent dans la matrice Beta
+  valid_ids <- intersect(neighbors$CpG, rownames(beta_matrix))
+  
+  if(length(valid_ids) == 0) next
+  
+  # --- D. Préparation des données (Pivot Longer) ---
+  plot_data <- as.data.frame(beta_matrix[valid_ids, , drop=FALSE])
+  plot_data$CpG <- rownames(plot_data)
+  
+  # Ajout de la position (depuis neighbors pour être sûr)
+  plot_data$Pos <- neighbors$MAPINFO[match(plot_data$CpG, neighbors$CpG)]
+  
+  # Pivot : Format long pour afficher chaque sample individuellement
+  long_data <- pivot_longer(plot_data, cols = -c(CpG, Pos), names_to = "Sample", values_to = "Beta")
+  
+  # Ajout des groupes (Pheno)
+  if(!is.null(pheno) && length(pheno) == ncol(beta_matrix)) {
+    sample_map <- data.frame(Sample = colnames(beta_matrix), Group = as.factor(pheno), stringsAsFactors = FALSE)
+    long_data <- left_join(long_data, sample_map, by="Sample")
+  } else { 
+    long_data$Group <- "All" 
+  }
+  
+  # --- E. Graphique (Même code que UI) ---
+  suppressWarnings({
+    p <- ggplot(long_data, aes(x=Pos, y=Beta)) +
+         # Points individuels (Samples)
+         geom_point(aes(color=Group,
+                        text = paste0("Sample: ", Sample,
+                                      "<br>Group: ", Group,
+                                      "<br>CpG: ", CpG,
+                                      "<br>Pos: ", format(Pos, big.mark=","),
+                                      "<br>Beta: ", round(Beta, 3))),
+                    alpha=0.6, size=1.5) +
+         
+         # Courbe Loess par groupe
+         geom_smooth(aes(color=Group, fill=Group), method="loess", formula = y ~ x, alpha=0.2) +
+         
+         # Ligne verticale cible
+         geom_vline(xintercept = target_pos, linetype="dashed", color="black") +
+         
+         # Mise en page
+         scale_y_continuous(labels = scales::percent_format(accuracy=1), limits=c(0, 1.1)) +
+         scale_x_continuous(labels = scales::comma) +
+         
+         # Force l'axe X à montrer toute la fenêtre 5kb
+         coord_cartesian(xlim = c(w_start, w_end)) +
+         
+         labs(title = paste0(target_id, " (", target_gene, ")"),
+              subtitle = paste0("Region: chr", target_chr, ":", format(w_start, big.mark=","), "-", format(w_end, big.mark=",")),
+              x = "Genomic Position (bp)", y = "Methylation %") +
+         
+         theme_minimal() +
+         scale_color_brewer(palette="Set1") + 
+         scale_fill_brewer(palette="Set1")
+    
+    # Interactivité Plotly
+    p_ly <- ggplotly(p, tooltip = "text") %>% 
+      layout(margin = list(b = 50, t = 50))
+    
+    # Stockage dans la liste
+    plot_list[[length(plot_list) + 1]] <- htmltools::tags$h3(paste0(i, ". ", target_id))
+    plot_list[[length(plot_list) + 1]] <- p_ly
+    plot_list[[length(plot_list) + 1]] <- htmltools::tags$hr()
+  })
+}
+
+# Rendu final de la liste
+htmltools::tagList(plot_list)
+```
+
+```{r}
+get_multi_window_plots <- function(target_ids, beta, pheno, probe_features, window_bp = 5000) {
+  
+  # --- 1. Préparation globale ---
+  # On nettoie l'annotation une seule fois pour gagner du temps
+  # Force MAPINFO en numérique
+  if("MAPINFO" %in% colnames(probe_features)) {
+    probe_features$MAPINFO <- as.numeric(as.character(probe_features$MAPINFO))
+  }
+  
+  # Force CHR sans "chr"
+  chr_col <- grep("CHR", colnames(probe_features), ignore.case = TRUE, value = TRUE)[1]
+  if(!is.na(chr_col)) {
+    probe_features$CHR_Clean <- gsub("chr", "", as.character(probe_features[[chr_col]]), ignore.case = TRUE)
+  }
+  
+  # Si CpG n'est pas une colonne, on la crée depuis les rownames
+  if(!"CpG" %in% colnames(probe_features)) {
+    probe_features$CpG <- rownames(probe_features)
+  }
+
+  # --- 2. Boucle sur les CpGs (lapply) ---
+  plot_list <- lapply(target_ids, function(target_id) {
+    
+    # Gestion d'erreur pour ne pas casser la boucle si un CpG est invalide
+    tryCatch({
+      
+      # A. Vérif existence
+      sel_info <- probe_features[probe_features$CpG == target_id, ]
+      if(nrow(sel_info) == 0) {
+        warning(paste("CpG non trouvé:", target_id))
+        return(NULL)
+      }
+      
+      # B. Infos Cible
+      target_chr <- sel_info$CHR_Clean[1]
+      target_pos <- sel_info$MAPINFO[1]
+      target_gene <- if("gene" %in% colnames(sel_info)) sel_info$gene[1] else ""
+      
+      w_start <- target_pos - window_bp
+      w_end   <- target_pos + window_bp
+      
+      # C. Recherche Voisins (Logique stricte UI)
+      neighbors <- probe_features %>%
+        filter(CHR_Clean == target_chr, 
+               MAPINFO >= w_start, 
+               MAPINFO <= w_end)
+      
+      valid_ids <- intersect(neighbors$CpG, rownames(beta))
+      
+      if(length(valid_ids) == 0) return(NULL)
+      
+      # D. Préparation Données Plot
+      plot_data <- as.data.frame(beta[valid_ids, , drop=FALSE])
+      plot_data$CpG <- rownames(plot_data)
+      plot_data$Pos <- neighbors$MAPINFO[match(plot_data$CpG, neighbors$CpG)]
+      
+      # Pivot format Long
+      long_data <- pivot_longer(plot_data, cols = -c(CpG, Pos), names_to = "Sample", values_to = "Beta")
+      
+      # Ajout Groupes
+      if(!is.null(pheno) && length(pheno) == ncol(beta)) {
+        sample_map <- data.frame(Sample = colnames(beta), Group = as.factor(pheno), stringsAsFactors = FALSE)
+        long_data <- left_join(long_data, sample_map, by="Sample")
+      } else { 
+        long_data$Group <- "All" 
+      }
+      
+      # E. Graphique
+      # suppressWarnings pour éviter le spam console sur le Loess
+      suppressWarnings({
+        p <- ggplot(long_data, aes(x=Pos, y=Beta)) +
+          geom_point(aes(color=Group,
+                         text = paste0("Sample: ", Sample,
+                                       "<br>CpG: ", CpG,
+                                       "<br>Pos: ", format(Pos, big.mark=","),
+                                       "<br>Beta: ", round(Beta, 3))),
+                     alpha=0.6, size=1.5) +
+          geom_smooth(aes(color=Group, fill=Group), method="loess", formula = y ~ x, alpha=0.2) +
+          geom_vline(xintercept = target_pos, linetype="dashed", color="black") +
+          scale_y_continuous(labels = scales::percent_format(accuracy=1), limits=c(0, 1.1)) +
+          scale_x_continuous(labels = scales::comma) +
+          # Force l'affichage de toute la fenêtre
+          coord_cartesian(xlim = c(w_start, w_end)) +
+          labs(title = paste0(target_id, " (", target_gene, ")"),
+               subtitle = paste0("Region: chr", target_chr, ":", format(w_start, big.mark=","), "-", format(w_end, big.mark=",")),
+               x = "Genomic Position (bp)", y = "Methylation %") +
+          theme_minimal() +
+          scale_color_brewer(palette="Set1") + 
+          scale_fill_brewer(palette="Set1")
+        
+        # Retourne l'objet Plotly
+        return(ggplotly(p, tooltip = "text"))
+      })
+      
+    }, error = function(e) {
+      warning(paste("Erreur pour", target_id, ":", e$message))
+      return(NULL)
+    })
+  })
+  
+  # Nommer la liste avec les IDs des CpG pour accès facile
+  names(plot_list) <- target_ids
+  
+  # Retirer les éléments NULL (ceux qui ont échoué)
+  plot_list <- plot_list[!sapply(plot_list, is.null)]
+  
+  return(plot_list)
+}
+```
+
+
+---
+
+## Session Info
+
+```{r session_info}
+sessionInfo()
+```

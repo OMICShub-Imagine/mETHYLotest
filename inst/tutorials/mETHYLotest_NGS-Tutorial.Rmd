@@ -1,0 +1,741 @@
+---
+title: "mETHYLotest Tutorial: NGS Methylation Analysis (WGBS, RRBS, Nanopore, PacBio)"
+#date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: true
+    theme: flatly
+    highlight: tango
+    code_folding: show
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  eval    = FALSE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+# Introduction
+
+**mETHYLotest** provides an NGS methylation module for analysing data from:
+
+| Technology | Tools supported |
+|---|---|
+| **Short-read WGBS** | Bismark (CytosineReport, Coverage) |
+| **Short-read RRBS** | Bismark, AMP |
+| **Oxford Nanopore** | modkit (bedMethyl), f5c / Nanopolish |
+| **PacBio HiFi** | pb-CpG-tools |
+
+The module wraps [methylKit](https://github.com/al2na/methylKit)
+and provides:
+
+- Interactive project setup UI with preset column mappings
+- Iterative QC with adjustable coverage thresholds and control genome monitoring
+- Automatic detection and reporting of control genomes (pUC19, Lambda, E. coli, PhiX)
+- Multi-scenario differential methylation (Basic, Batch, Covariate, Full)
+- Tiling window analysis (region-level DMRs)
+- Genome segmentation (UMR/LMR/PMD/HMR)
+- Signature generation, validation (SVM/PCA/Silhouette) and benchmarking
+- Genomic annotation (annotatr)
+- Automated HTML reporting (QC + Final)
+
+[View example Final Report](https://htmlpreview.github.io/?https://github.com/OMICShub-Imagine/mETHYLotest/blob/main/inst/tutorials/NGS_DEMO_Final_Report.html){target="_blank"}
+
+---
+
+# Requirements
+
+## R packages
+
+```{r install}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+# Core
+BiocManager::install(c("methylKit", "annotatr"))
+
+# CRAN dependencies (installed with mETHYLotest)
+install.packages(c(
+  "shiny", "shinydashboard", "shinyjs", "shinyFiles",
+  "readxl", "writexl", "DT", "fs", "parallel",
+  "plotly", "ggplot2", "caret", "e1071", "cluster", "pROC",
+  "rmarkdown", "knitr"
+))
+```
+
+## Input files
+
+Two inputs are required:
+
+1. **A metadata Excel file** (`.xlsx`) -- see Section \@ref(metadata).
+2. **Methylation call files** -- one per sample, in any supported format.
+
+## Metadata file format {#metadata}
+
+The Excel file must contain **three required columns**:
+
+| Column | Type | Description | Example |
+|---|---|---|---|
+| `Sample_ID` | character | Unique sample identifier | `CTRL_01` |
+| `Path` | character | Absolute path to the methylation call file | `/data/ctrl1.bed` |
+| `Treatment` | integer | Group assignment: `0` = Control, `1` = Case | `0` |
+
+> **`Treatment`** must be strictly `0` or `1`. Other values will cause
+> an error.
+
+Any **additional columns** (e.g. `Batch`, `Sex`, `Age`) are preserved
+and available for **batch correction** and **covariate adjustment**.
+
+### Example metadata
+
+| Sample_ID | Path | Treatment | Batch | Sex |
+|---|---|---|---|---|
+| ctrl1 | /data/ctrl1_modkit.bed | 0 | B1 | F |
+| ctrl2 | /data/ctrl2_modkit.bed | 0 | B2 | M |
+| case1 | /data/case1_modkit.bed | 1 | B1 | F |
+| case2 | /data/case2_modkit.bed | 1 | B2 | M |
+
+---
+
+# Pipeline Overview
+
+```
+mETHYLotest.NGS.pipeline()
+        |
+   methylKit::methRead()        Import methylation call files
+        |
+   Coordinate offset            (for 0-based BED -> 1-based)
+        |
+   Pre-compute control genomes  (pUC19, Lambda, E.coli, PhiX)
+        |
+   Iterative QC loop            Coverage filtering + sample exclusion
+        |                       + control genome QC report
+   normalizeCoverage()          Coverage normalization (optional)
+        |
+   methylKit::unite()           Intersect CpGs across all samples
+        |
+   Correlation + Clustering     Sample quality assessment
+        |
+   calculateDiffMeth()          Multi-scenario differential methylation
+        |                       (Basic, Batch, Covariate, Full Model)
+   Export DMCs                   Excel + BED
+        |
+   tileMethylCounts()           Tiling windows (optional, region-level)
+        |
+   methSeg()                    Genome segmentation (optional, HMM)
+        |
+   Default signatures           Top 500 DMCs by combined score
+        |
+   DiffMeth UI                  Interactive explorer + user signatures
+        |
+   Signature Validation         SVM / PCA / Silhouette
+        |
+   Validation UI + Report       Interactive benchmark
+        |
+   Genomic Annotation           annotatr
+        |
+   Final Report                 HTML summary
+```
+
+---
+
+# Usage
+
+## Full Pipeline (Recommended)
+
+```{r pipeline-full}
+library(mETHYLotest)
+
+# Opens the project setup UI, then runs the full pipeline
+results <- mETHYLotest.NGS.pipeline()
+
+# Or re-run an existing project
+results <- mETHYLotest.NGS.pipeline(
+  project_directory = "/path/to/My_NGS_Project"
+)
+```
+
+The function returns a named list:
+
+```{r results-structure}
+names(results)
+# [1] "meth"               "diff_results"       "tiles_results"
+# [4] "seg_results"        "validation_results"  "annotated"
+# [7] "config"
+```
+
+## Step-by-Step
+
+```{r pipeline-steps}
+library(mETHYLotest)
+
+# 1. Create project via UI
+project_dir <- mETHYLotest.NGS.ProjectUI()
+
+# 2. Load config
+source(file.path(project_dir, "Results", "project_config.R"))
+cfg <- project_config
+
+# 3. Re-open DiffMeth UI on existing results
+diff_results <- readRDS(
+  file.path(project_dir, "data", "interim", "diff_results_list.rds"))
+mETHYLotest.NGS.DiffMeth.UI(
+  diff_results,
+  output_dir = file.path(project_dir, "Results", "DiffMeth_Figures"))
+
+# 4. Re-open Validation UI
+validation_results <- readRDS(
+  file.path(project_dir, "data", "interim", "validation_results.rds"))
+mETHYLotest.NGS.Validate.UI(validation_results)
+```
+
+## Reloading an Existing Project
+
+```{r reload}
+# Via pipeline (auto-detects)
+results <- mETHYLotest.NGS.pipeline("/path/to/My_NGS_Project")
+
+# Via UI
+project_dir <- mETHYLotest.NGS.ProjectUI()
+
+# Direct RDS loading
+diff_results <- readRDS("My_Project/data/interim/diff_results_list.rds")
+```
+
+---
+
+## Standalone Usage (without the full pipeline)
+
+You can use mETHYLotest functions individually on any methylKit object:
+
+### QC on an existing methylRawList
+
+```r
+library(mETHYLotest)
+library(methylKit)
+
+# Your existing methylKit object
+myobj <- methRead(...)
+myobj_filt <- filterByCoverage(myobj, lo.count = 10, hi.perc = 99.9)
+
+# Run QC analysis
+qc <- mETHYLotest.NGS.QC(
+  methyl_obj      = myobj_filt,
+  output_base_dir = "my_qc_output/",
+  chromosomes     = paste0("chr", c(1:22, "X", "Y")),
+  current_min_cov = 10,
+  unite_destrand  = TRUE
+)
+
+# Open interactive QC dashboard
+mETHYLotest.NGS.QC.UI(
+  df_meth    = qc$df_meth,
+  df_controls = qc$df_controls,
+  df_stats   = qc$df_stats,
+  df_global_meth = qc$df_global_meth
+)
+```
+
+### Generate QC report
+
+```{r}
+mETHYLotest.NGS.GenerateQCReport(
+  df_meth     = qc$df_meth,
+  df_controls = qc$df_controls,
+  df_stats    = qc$df_stats,
+  df_global_meth = qc$df_global_meth,
+  min_cov     = 10,
+  excluded_samples = c("bad_sample_1"),
+  output_file = "My_QC_Report.html"
+)
+```
+
+### Validate Signatures on an existing methylBase
+
+```{r}
+meth <- methylKit::unite(myobj_filt, destrand = TRUE)
+diff <- methylKit::calculateDiffMeth(meth)
+
+# Create signature file (one locus per line)
+sig <- paste0(diff_data$chr, ":", diff_data$start, "-", diff_data$end)
+writeLines(sig[1:100], "my_signature.txt")
+
+# Validate
+val <- mETHYLotest.NGS.validate(
+  meth = meth,
+  diff_results = list(Basic = diff),
+  signatures_folder = ".",
+  diff_cutoff = 10,
+  diff_qvalue = 0.05
+)
+
+# Interactive exploration
+mETHYLotest.NGS.Validate.UI(val)
+```
+
+---
+
+# Demo Mode {#demo}
+
+A built-in demo is available to test the full pipeline without
+providing your own data. It uses synthetic CX reports bundled
+with the package.
+
+## Quick Start
+
+```{r demo-launch}
+library(mETHYLotest)
+mETHYLotest.NGS.pipeline("demo")
+```
+
+This will:
+
+1. Locate the demo metadata and synthetic CX reports inside the package
+2. Resolve file paths automatically
+3. Open the Project Setup UI with the metadata path **pre-filled**
+4. Display a notification asking you to click **"Load & Validate Metadata"**
+
+From there, configure the parameters and click
+**"Generate Project"** to run the full pipeline.
+
+## Demo Dataset
+
+| Sample | Treatment | Group | DevDay | Run | Morphology |
+|---|---|---|---|---|---|
+| CTL1 | 0 | CTL | 0 | 100 | ABC |
+| CTL2 | 0 | CTL | 1 | 100 | ABC |
+| CTL3 | 0 | CTL | 2 | 101 | BCA |
+| CTL4 | 0 | CTL | 3 | 101 | ABC |
+| CTL5 | 0 | CTL | 4 | 101 | BCA |
+| TEST1 | 1 | TEST | 0 | 100 | BCA |
+| TEST2 | 1 | TEST | 1 | 100 | ABC |
+| TEST3 | 1 | TEST | 2 | 101 | ABC |
+| TEST4 | 1 | TEST | 3 | 101 | BCA |
+| TEST5 | 1 | TEST | 4 | 101 | ABC |
+
+The extra columns (`Group`, `DevDay`, `Run`, `Morphology`) are
+available for **batch correction** and **covariate adjustment**
+in the Analysis Options tab.
+
+> **Important:** The demo dataset is entirely synthetic. The columns
+> `Run`, `DevDay` and `Morphology` are fictitious and serve only to
+> demonstrate the multi-scenario feature. In a real experiment, use
+> genuine technical batches (sequencing run, slide) or biological
+> confounders (sex, age).
+
+## Recommended Demo Settings
+
+For a quick test run, use these settings in the UI:
+
+| Tab | Parameter | Value | Why |
+|---|---|---|---|
+| Import | Assembly | `hg38` | Reference genome |
+| Import | Pipeline | `bismarkCytosineReport` | Demo file format |
+| QC | Min coverage | `1` | Synthetic data, low coverage |
+| Analysis | Destrand | `TRUE` | CpG context, merge strands |
+| Analysis | Tiling | `FALSE` | Skip for speed |
+| Analysis | Segmentation | `FALSE` | Skip for speed |
+| Analysis | Diff cutoff | `10%` | Standard threshold |
+
+## Testing All 4 Differential Methylation Scenarios
+
+The pipeline supports up to 4 scenarios depending on your configuration.
+To test them all with the demo data:
+
+In **Tab 5 - Review & Launch**, enable:
+
+| Option | Setting | Effect |
+|---|---|---|
+| Batch Correction | select **Run** only | Creates `Batch_Correction` scenario |
+| Covariates | select **Morphology** only | Creates `Covariate_Adj` scenario |
+| *(both enabled)* | | Also creates `Full_Model` scenario |
+
+This produces all 4 scenarios:
+
+| Scenario | Covariates used | Description |
+|---|---|---|
+| **Basic** | None | No correction (always runs) |
+| **Batch_Correction** | Run | Technical batch correction |
+| **Covariate_Adj** | Morphology | Biological covariate adjustment |
+| **Full_Model** | Run + Morphology | Combined correction |
+
+> **Note:** Do not select too many variables with few samples,
+> or the Full_Model will be skipped (overfitting protection).
+> With 10 samples, use at most 1 batch + 1 covariate variable.
+
+## What the Demo Produces
+
+After running the full pipeline, you will have:
+
+| Output | Location | Content |
+|---|---|---|
+| QC Report | `Results/Final_QC_Report.html` | Coverage stats, controls, global methylation |
+| QC Plots | `Results/QC/cov_1/` | Per-sample methylation and coverage histograms |
+| Correlation | `Results/Comparative_Analysis/figures/` | Sample correlation matrix |
+| Clustering | `Results/Comparative_Analysis/figures/` | Hierarchical clustering dendrogram |
+| DMC files | `Results/Differential_Analysis/` | Excel + BED per scenario |
+| Signatures | `Results/Signatures/` | Top 500 DMCs per scenario |
+| Validation | `Results/Validation/` | HTML report with SVM, PCA, Silhouette |
+| Annotation | `Results/Annotation/` | Annotated DMCs (promoters, CpG islands, etc.) |
+| Final Report | `Results/Final_Report.html` | Complete summary of all analyses |
+
+---
+
+# Project Setup UI {#ui}
+
+```{r ui-launch}
+project_dir <- mETHYLotest.NGS.ProjectUI()
+```
+
+The UI has five tabs:
+
+## Tab 1 -- Data Source
+
+Select your metadata `.xlsx` file. Required columns are validated
+immediately. Additional columns are detected for batch/covariate
+adjustment.
+
+![Data Source tab](../img/mETHYLotest.NGS.ProjectUI.DataSource.png){width=100%}
+
+## Tab 2 -- Import Options
+
+### Standard pipelines
+
+| Pipeline | Input format |
+|---|---|
+| `bismarkCytosineReport` | CX_report.txt (genome-wide) |
+| `bismarkCoverage` | .bismark.cov (coverage only) |
+| `bismark` | Legacy format |
+| `amp` | Amplicon bisulfite |
+
+### Custom column mapping (Long-Read)
+
+| Preset | Tool | Coverage col | Meth col | Fraction? | Offset |
+|---|---|---|---|---|---|
+| **modkit** | ONT modkit | 10 | 11 | No (%) | +1 |
+| **f5c** | f5c / Nanopolish | 6 | 8 | Yes (0-1) | +1 |
+| **pbcpg** | pb-CpG-tools | 10 | 11 | No (%) | +1 |
+
+> **Coordinate offset:** Long-read tools produce 0-based BED coordinates.
+> An offset of `+1` converts to 1-based (methylKit).
+
+![Import Options tab](../img/mETHYLotest.NGS.ProjectUI.ImportOptions.png){width=100%}
+
+## Tab 3 -- QC & Filtering
+
+| Parameter | Default | Description |
+|---|---|---|
+| `lo.count` | 10 | Minimum read count. **Used for both import and QC.** |
+| `hi.perc` | 99.9 | Upper coverage percentile (removes PCR duplicates) |
+| `lo.perc` | NULL | Alternative: low coverage percentile |
+
+> These are **starting values**. The QC UI lets you refine them
+> interactively during execution.
+
+![QC & Filtering tab](../img/mETHYLotest.NGS.ProjectUI.QCandFiltering.png){width=100%}
+
+## Tab 4 -- Analysis Options
+
+| Category | Key Parameters |
+|---|---|
+| **Unite** | `destrand` (TRUE for CpG) |
+| **Coverage Normalization** | Method: median / mean (optional) |
+| **Clustering** | Distance: correlation / euclidean; Method: ward / complete |
+| **Tiling** | Window/step size, min CpGs (optional) |
+| **Segmentation** | HMM states, min segment length (optional) |
+| **DiffMeth** | Overdispersion: MN; Test: Chisq; Cutoff: 10%; Q-value: 0.05 |
+| **Annotation** | Diff cutoff synced with DiffMeth; Q-value: 0.05 |
+
+![Analysis Options](../img/mETHYLotest.NGS.ProjectUI.AnalysisOptions_1.png){width=100%}
+![Analysis Options](../img/mETHYLotest.NGS.ProjectUI.AnalysisOptions_2.png){width=100%}
+
+## Tab 5 -- Review & Launch
+
+Select/deselect samples, configure batch correction and covariates,
+review summary, and generate the project.
+
+![Review & Launch](../img/mETHYLotest.NGS.ProjectUI.ReviewandLaunch_1.png){width=100%}
+![Review & Launch](../img/mETHYLotest.NGS.ProjectUI.ReviewandLaunch_2.png){width=100%}
+
+---
+
+# Pipeline Details
+
+## Smart Loading
+
+The pipeline checks for `myobj_raw.rds` before importing. If found,
+import is skipped:
+
+```{r smart-load}
+# First run: imports from raw files (slow)
+# Second run: loads from data/interim/myobj_raw.rds (instant)
+```
+
+## Control Genome Detection
+
+Before QC, the pipeline pre-computes control genome data from **all
+original samples** (never lost even when samples are excluded).
+
+| Control | Patterns | Expected | If wrong |
+|---|---|---|---|
+| **pUC19** | pUC19, chrPUC, NC_001773 | **~100%** | Over-conversion |
+| **Lambda** | lambda, chrL, J02459, NC_001416 | **~0%** | Incomplete conversion |
+| **E. coli** | NC_000913 | **~0%** | Incomplete conversion |
+| **PhiX** | phiX, NC_001422 | **~0%** | Incomplete conversion |
+
+## Iterative QC Loop
+
+```
+repeat {
+  1. Coverage filters (lo.count, hi.perc)
+  2. Chromosome filtering
+  3. Sample exclusion (manual + auto-empty)
+  4. QC metrics + control assessment
+  5. Interactive QC UI
+  6. User: "proceed" or "update"
+}
+```
+
+Each iteration saves QC plots in a separate directory.
+Empty samples are automatically removed with a check that
+both treatment groups remain.
+
+![QC - CpG Positions](../img/mETHYLotest.NGS.QC_UI.CpGpos.png){width=100%}
+![QC - Controls](../img/mETHYLotest.NGS.QC_UI.Controls.png){width=100%}
+![QC - Overview](../img/mETHYLotest.NGS.QC_UI.OverwiewMet.png){width=100%}
+![QC - Refine](../img/mETHYLotest.NGS.QC_UI.Refine_and_Validate.png){width=100%}
+
+### Saved QC Artifacts
+
+| File | Content |
+|---|---|
+| `excluded_samples.rds` | All excluded sample IDs |
+| `qc_final_params.rds` | Final thresholds + sample lists |
+| `control_genomes_all_samples.rds` | Control data (all samples) |
+| `global_methylation_per_sample.rds` | Per-sample global methylation |
+
+## Differential Methylation
+
+### Multi-Scenario
+
+| Scenario | Covariates | When |
+|---|---|---|
+| **Basic** | None | Always |
+| **Batch_Correction** | Batch columns | If enabled |
+| **Covariate_Adj** | Covariates | If enabled |
+| **Full_Model** | Both | If both enabled |
+
+### Export Strategy
+
+| File | Content | When |
+|---|---|---|
+| `DMC_<Model>.xlsx/.bed` | Significant DMCs (with Mean_CTL, Mean_Test, Status) | If any pass |
+| `DMC_relaxed_<Model>.xlsx` | Q-value only | If strict finds nothing |
+| `Full_<Model>.xlsx` | All positions | Always |
+
+### DiffMeth Explorer UI
+
+Interactive volcano plot, DMC table with export, and signature creation.
+
+![DiffMeth Explorer](../img/mETHYLotest.NGS.DiffMeth.png){width=100%}
+
+## Signatures & Validation
+
+Default signatures: top 500 DMCs ranked by
+$\text{score} = -\log_{10}(q) \times |\text{diff}|$
+
+Validation methods:
+
+- **SVM** with cross-validation (LOOCV for small samples)
+- **PCA** for unsupervised separation
+- **Silhouette** for clustering quality
+
+![Validation Overview](../img/mETHYLotest.NGS.Validation.Overview.png){width=100%}
+![Validation PCA](../img/mETHYLotest.NGS.Validation.PCA1.png){width=100%}
+![Validation PCA](../img/mETHYLotest.NGS.Validation.PCA2.png){width=100%}
+![Validation SVM](../img/mETHYLotest.NGS.Validation.SVM.png){width=100%}
+![Validation Top Loci](../img/mETHYLotest.NGS.Validation.TOP.png){width=100%}
+![Validation CpG Details](../img/mETHYLotest.NGS.Validation.CpG_details.png){width=100%}
+
+---
+
+# Reports
+
+## QC Report (`Final_QC_Report.html`)
+
+Generated at the end of the QC loop:
+
+- QC parameters and iteration count
+- Excluded samples with reasons
+- Coverage statistics per sample
+- Methylation profile by chromosome (barplot + heatmap)
+- Global methylation per group (Control vs Case)
+- Control genomes (all samples, PASS/WARN)
+- QC assessment flags
+
+[View example QC Report](https://htmlpreview.github.io/?https://github.com/OMICShub-Imagine/mETHYLotest/blob/main/inst/tutorials/NGS_DEMO_QC_Report.html){target="_blank"}
+
+## Validation Report (`Validation_Report.html`)
+
+Generated after signature validation:
+
+- Benchmark table comparing all signatures (performance, silhouette)
+- Per-signature detailed report:
+  - SVM metrics (AUC/Accuracy, Sensitivity, Kappa)
+  - PCA with confidence ellipses + scree plot
+  - Hierarchical clustering heatmap
+  - Confusion matrix and ROC curve
+  - Top 20 discriminative loci
+  - CpG locus details (per-group means, delta)
+  - Per-fold accuracy (cross-validation)
+
+[View example Validation Report](https://htmlpreview.github.io/?https://github.com/OMICShub-Imagine/mETHYLotest/blob/main/inst/tutorials/NGS_DEMO_Validation_Report.html){target="_blank"}
+
+## Final Report (`Final_Report.html`)
+
+Generated at the end of the pipeline:
+
+- Project summary and parameters
+- Sample table with exclusion status
+- Comparative analysis (correlation, clustering)
+- Differential methylation (summary, volcano, distribution per scenario)
+- Genomic annotation
+- Signature validation summary
+- File inventory
+
+[View example Final Report](https://htmlpreview.github.io/?https://github.com/OMICShub-Imagine/mETHYLotest/blob/main/inst/tutorials/NGS_DEMO_Final_Report.html){target="_blank"}
+---
+
+# Project Structure
+
+```
+My_Project/
+|-- data/
+|   |-- selected_samples.xlsx
+|   +-- interim/
+|       |-- myobj_raw.rds
+|       |-- excluded_samples.rds
+|       |-- qc_final_params.rds
+|       |-- control_genomes_all_samples.rds
+|       |-- global_methylation_per_sample.rds
+|       |-- diff_results_list.rds
+|       +-- validation_results.rds
+|
++-- Results/
+    |-- project_config.R
+    |-- Final_QC_Report.html
+    |-- Final_Report.html
+    |-- QC/cov_1/, QC/cov_10/
+    |-- Comparative_Analysis/figures/
+    |-- Differential_Analysis/
+    |-- Tiling_Windows/
+    |-- Segmentation/
+    |-- Signatures/
+    |-- Validation/
+    |-- DiffMeth_Figures/
+    +-- Annotation/
+```
+
+---
+
+# Configuration Reference
+
+```{r config-ref}
+# Paths
+cfg$project_name; cfg$project_dir; cfg$res_dir
+cfg$rds_dir; cfg$pheno_file
+
+# Import
+cfg$assembly          # "hg38"
+cfg$context           # "CpG"
+cfg$min_coverage      # = qc_lo_count
+cfg$pipeline          # "bismarkCytosineReport" or list(...)
+cfg$coord_offset      # 0 (Bismark) or 1 (BED)
+
+# QC
+cfg$qc_lo_count       # 10
+cfg$qc_hi_perc        # 99.9
+
+# Coverage Normalization
+cfg$do_normalize_coverage  # TRUE/FALSE
+cfg$normalize_cov_method   # "median" or "mean"
+
+# Analysis
+cfg$unite_destrand    # TRUE
+cfg$cluster_dist      # "correlation"
+cfg$cluster_method    # "ward"
+cfg$diff_overdispersion  # "MN"
+cfg$diff_test         # "Chisq"
+cfg$diff_cutoff       # 10
+cfg$diff_qvalue       # 0.05
+cfg$annot_diff_cutoff # same as diff_cutoff
+cfg$annot_qval_cutoff # 0.05
+
+# Adjustments
+cfg$perform_batch_correction  # TRUE/FALSE
+cfg$batch_cols        # c("Batch")
+cfg$perform_covariate_adj     # TRUE/FALSE
+cfg$covariates        # c("Sex")
+
+# System
+cfg$num_cores         # 4
+cfg$save_raw_obj      # TRUE
+```
+
+---
+
+# Supported File Formats
+
+| Format | Example line |
+|---|---|
+| **Bismark CytosineReport** | `chr1  10525  +  0  2  CpG  CGT` |
+| **Bismark Coverage** | `chr1  10525  10525  100  2  0` |
+| **modkit bedMethyl** | `chr1  100  101  m  913  +  ...  38  0.913  ...` |
+| **f5c / Nanopolish** | `chr1  100  101  +  1  38  35  0.921  ACGT` |
+| **pb-CpG-tools** | `chr1  100  101  m  0  +  ...  38  92.1` |
+
+---
+
+# Troubleshooting
+
+| Error | Cause | Solution |
+|---|---|---|
+| `non-numeric argument` | Wrong column mapping | Check preset/col numbers |
+| `All samples excluded` | Over-aggressive QC | Relax thresholds |
+| `Only one treatment group` | All of one group excluded | Lower coverage |
+| `overfitting risk` | Too many covariates | Reduce variables |
+| `No DMCs found` | Strict thresholds | Lower diff_cutoff |
+| `methSeg` crash | Too few CpGs | Check unite output |
+| Offset wrong | Missing +1 for BED | Set coord_offset = 1 |
+| Control not detected | Unknown pattern | Add to control_chr_patterns |
+
+### Performance Tips
+
+- `dbtype = "tabix"` for large files (>10M CpGs)
+- Increase `num_cores` for DiffMeth and unite
+- `save_raw_obj = TRUE` to skip reimport
+- Disable tiling/segmentation for quick runs
+
+---
+
+# Citation
+
+```{r citation, eval=TRUE}
+citation("mETHYLotest")
+```
+
+---
+
+# Session Info
+
+```{r session, eval=TRUE, echo=FALSE}
+sessionInfo()
+```

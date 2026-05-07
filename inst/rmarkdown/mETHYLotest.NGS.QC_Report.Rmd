@@ -1,0 +1,836 @@
+---
+title: "mETHYLotest - NGS Quality Control Report"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    code_folding: hide
+    df_print: paged
+    self_contained: true
+params:
+  df_meth: NULL
+  df_controls: NULL
+  df_controls_all: NULL
+  df_stats: NULL
+  df_global_meth: NULL
+  min_cov: 2
+  excluded_samples: NULL
+  project_dir: NULL
+---
+
+```{=html}
+<style>
+.qc-box {
+  background: #f8f9fa; border-radius: 5px;
+  border-left: 4px solid #3498db; padding: 12px 15px;
+  margin-bottom: 15px;
+}
+.qc-box h4 { margin: 0 0 8px 0; color: #2c3e50; }
+.qc-box p  { margin: 2px 0; }
+.metric-row { display: flex; gap: 15px; margin: 15px 0; flex-wrap: wrap; }
+.metric-card {
+  flex: 1; text-align: center; padding: 15px;
+  border-radius: 5px; background: #f5f5f5;
+  border: 1px solid #e3e3e3; min-width: 120px;
+}
+.metric-card .value { font-size: 2em; font-weight: bold; }
+.metric-card .label { color: #666; font-size: 0.9em; }
+.warn-card     { border-left-color: #e74c3c; background: #fef2f2; }
+.ok-card       { border-left-color: #27ae60; background: #f0faf0; }
+.excluded-card { border-left-color: #e67e22; background: #fef5e7; }
+.info-card     { border-left-color: #8e44ad; background: #f5eef8; }
+</style>
+```
+
+```{r setup, include=FALSE}
+# ── Force figures to a LOCAL temp dir (avoids UNC/pandoc bug) ──
+local_fig_dir <- file.path(tempdir(), "methylflow_qc_figs/")
+if (!dir.exists(local_fig_dir)) dir.create(local_fig_dir, recursive = TRUE)
+
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width  = 10,
+  fig.height = 6,
+  dpi = 100,
+  fig.path = local_fig_dir
+)
+
+library(ggplot2)
+library(plotly)
+library(DT)
+library(htmltools)
+library(knitr)
+
+df_meth     <- params$df_meth
+df_controls <- params$df_controls
+df_stats    <- params$df_stats
+min_cov     <- params$min_cov
+
+# =====================================================================
+# Load excluded samples (multiple sources for robustness)
+# =====================================================================
+excluded_from_params <- params$excluded_samples
+if (is.null(excluded_from_params)) excluded_from_params <- character(0)
+
+excluded_from_rds <- character(0)
+if (!is.null(params$project_dir)) {
+  rds_path <- file.path(params$project_dir, "data", "interim",
+                         "excluded_samples.rds")
+  if (file.exists(rds_path)) {
+    excluded_from_rds <- tryCatch(readRDS(rds_path),
+                                   error = function(e) character(0))
+  }
+}
+
+excluded <- unique(c(excluded_from_params, excluded_from_rds))
+excluded <- excluded[nzchar(excluded)]
+
+# =====================================================================
+# Load QC params
+# =====================================================================
+qc_params <- NULL
+if (!is.null(params$project_dir)) {
+  qcp_path <- file.path(params$project_dir, "data", "interim",
+                          "qc_final_params.rds")
+  if (file.exists(qcp_path)) {
+    qc_params <- tryCatch(readRDS(qcp_path), error = function(e) NULL)
+  }
+}
+
+# =====================================================================
+# Load control genome data for ALL samples (including excluded)
+# Priority: params > RDS file
+# =====================================================================
+df_controls_all <- params$df_controls_all
+
+if (is.null(df_controls_all) && !is.null(params$project_dir)) {
+  ctrl_rds <- file.path(params$project_dir, "data", "interim",
+                          "control_genomes_all_samples.rds")
+  if (file.exists(ctrl_rds)) {
+    df_controls_all <- tryCatch(readRDS(ctrl_rds),
+                                 error = function(e) NULL)
+  }
+}
+
+# Build merged control dataset
+df_controls_merged <- NULL
+
+if (!is.null(df_controls_all) && is.data.frame(df_controls_all) &&
+    nrow(df_controls_all) > 0) {
+  df_controls_merged <- df_controls_all
+  df_controls_merged$Status <- ifelse(
+    df_controls_merged$Sample %in% excluded, "Excluded", "Analysed")
+} else if (!is.null(df_controls) && is.data.frame(df_controls) &&
+           nrow(df_controls) > 0) {
+  df_controls_merged <- df_controls
+  df_controls_merged$Status <- "Analysed"
+}
+
+# =====================================================================
+# Load global methylation per sample
+# Priority: params > RDS file
+# =====================================================================
+df_global_meth <- params$df_global_meth
+
+if (is.null(df_global_meth) && !is.null(params$project_dir)) {
+  gm_rds <- file.path(params$project_dir, "data", "interim",
+                        "global_methylation_per_sample.rds")
+  if (file.exists(gm_rds)) {
+    df_global_meth <- tryCatch(readRDS(gm_rds), error = function(e) NULL)
+  }
+}
+```
+
+# QC Summary
+
+```{r qc_summary}
+n_excluded <- length(excluded)
+
+# ── Use qc_params as authoritative source ──
+if (!is.null(qc_params) && !is.null(qc_params$analyzed_sample_ids)) {
+  n_samples  <- length(qc_params$analyzed_sample_ids)
+  n_original <- length(qc_params$original_sample_ids)
+} else {
+  n_samples  <- if (!is.null(df_stats))
+    length(unique(df_stats$Sample)) else 0L
+  n_original <- n_samples + n_excluded
+}
+
+div(class = "qc-box",
+    h4("QC Parameters"),
+    p(strong("Minimum coverage: "), min_cov, "x"),
+    p(strong("Original samples: "), n_original),
+    p(strong("Samples analysed: "), n_samples),
+    p(strong("Samples excluded: "),
+      if (n_excluded == 0L) "None"
+      else paste0(n_excluded, " -- ", paste(excluded, collapse = ", "))),
+    if (!is.null(qc_params))
+      p(strong("QC iterations: "), qc_params$n_iterations)
+)
+```
+
+```{r excluded_detail, results='asis'}
+if (n_excluded > 0L) {
+  cat('<div class="qc-box excluded-card">\n')
+  cat('<h4>Excluded Samples</h4>\n')
+  cat('<p>The following samples were removed during QC and are ')
+  cat('<strong>not included</strong> in downstream analyses:</p>\n')
+  cat('<ul>\n')
+  for (ex_id in excluded) {
+    cat(sprintf('<li><strong>%s</strong></li>\n', ex_id))
+  }
+  cat('</ul>\n')
+  cat('<p><em>Reasons: manual exclusion via QC interface, ')
+  cat('empty after coverage filtering, or insufficient data.</em></p>\n')
+  cat('</div>\n')
+}
+```
+
+```{r qc_metrics}
+if (!is.null(df_stats) && nrow(df_stats) > 0) {
+  total_positions <- sum(df_stats$PositionCount[df_stats$Type == "Individual"],
+                          na.rm = TRUE)
+  avg_per_sample <- if (n_samples > 0)
+    round(total_positions / n_samples) else 0
+
+  # Get true original count from saved QC params
+  n_original <- if (!is.null(qc_params) &&
+                    !is.null(qc_params$original_sample_ids))
+    length(qc_params$original_sample_ids)
+  else
+    n_samples + n_excluded
+
+  div(class = "metric-row",
+      div(class = "metric-card",
+          div(class = "value", format(n_original, big.mark = ",")),
+          div(class = "label", "Original Samples")),
+      div(class = "metric-card",
+          tags$div(class = "value", style = "color:#27ae60;",
+              format(n_samples, big.mark = ",")),
+          div(class = "label", "Analysed Samples")),
+      if (n_excluded > 0)
+        div(class = "metric-card",
+            tags$div(class = "value", style = "color:#e67e22;",
+                     format(n_excluded, big.mark = ",")),
+            div(class = "label", "Excluded Samples")),
+      div(class = "metric-card",
+          div(class = "value",
+              format(avg_per_sample, big.mark = ",")),
+          div(class = "label", "Avg positions/sample")),
+      div(class = "metric-card",
+          div(class = "value", paste0(min_cov, "x")),
+          div(class = "label", "Min coverage"))
+  )
+}
+```
+
+---
+
+# Coverage Statistics
+
+```{r coverage_barplot}
+if (!is.null(df_stats) && nrow(df_stats) > 0) {
+  total_positions <- sum(df_stats$PositionCount[df_stats$Type == "Individual"],
+                          na.rm = TRUE)
+
+  # ── Get TRUE counts from qc_params (authoritative) ──
+  if (!is.null(qc_params) &&
+      !is.null(qc_params$original_sample_ids) &&
+      !is.null(qc_params$analyzed_sample_ids)) {
+    n_original <- length(qc_params$original_sample_ids)
+    n_analysed <- length(qc_params$analyzed_sample_ids)
+  } else {
+    # Fallback: derive from df_stats
+    n_original <- n_samples + n_excluded
+    n_analysed <- n_samples
+  }
+
+  avg_per_sample <- if (n_analysed > 0)
+    round(total_positions / n_analysed) else 0
+
+  div(class = "metric-row",
+      div(class = "metric-card",
+          div(class = "value", format(n_original, big.mark = ",")),
+          div(class = "label", "Original Samples")),
+      div(class = "metric-card",
+          tags$div(class = "value", style = "color:#27ae60;",
+              format(n_analysed, big.mark = ",")),
+          div(class = "label", "Analysed Samples")),
+      if (n_excluded > 0)
+        div(class = "metric-card",
+            tags$div(class = "value", style = "color:#e67e22;",
+                     format(n_excluded, big.mark = ",")),
+            div(class = "label", "Excluded Samples")),
+      div(class = "metric-card",
+          div(class = "value",
+              format(avg_per_sample, big.mark = ",")),
+          div(class = "label", "Avg positions/sample")),
+      div(class = "metric-card",
+          div(class = "value", paste0(min_cov, "x")),
+          div(class = "label", "Min coverage"))
+  )
+
+  # ── Sanity check ──
+  if (n_original != n_analysed + n_excluded) {
+    cat(sprintf(
+      '<div class="qc-box warn-card"><p><strong>Note:</strong> %d original - %d excluded = %d, but %d samples found in data. Some samples may have been added or removed outside the QC pipeline.</p></div>\n',
+      n_original, n_excluded, n_original - n_excluded, n_analysed))
+  }
+}
+```
+
+```{r coverage_table}
+if (!is.null(df_stats) && nrow(df_stats) > 0) {
+  summary_wide <- df_stats %>%
+    tidyr::pivot_wider(names_from = Type,
+                       values_from = PositionCount,
+                       values_fill = 0)
+
+  if ("Individual" %in% colnames(summary_wide) &&
+      "Common" %in% colnames(summary_wide)) {
+    summary_wide$Pct_Common <- round(
+      summary_wide$Common / summary_wide$Individual * 100, 1)
+  }
+
+  datatable(summary_wide,
+            options = list(pageLength = 20, dom = "t"),
+            caption = "Position counts per sample")
+}
+```
+
+---
+
+# Global Methylation
+
+```{r global_meth, fig.height=5, results='asis'}
+if (!is.null(df_global_meth) && nrow(df_global_meth) > 0) {
+
+  # ── Group summary ──
+  if ("Group" %in% colnames(df_global_meth)) {
+    ctrl_rows <- df_global_meth[df_global_meth$Group == "Control (0)", ]
+    case_rows <- df_global_meth[df_global_meth$Group == "Case (1)", ]
+    ctrl_m <- if (nrow(ctrl_rows) > 0) round(mean(ctrl_rows$Global_Meth_Pct, na.rm = TRUE), 1) else NA
+    ctrl_s <- if (nrow(ctrl_rows) > 1) round(sd(ctrl_rows$Global_Meth_Pct, na.rm = TRUE), 1) else NA
+    case_m <- if (nrow(case_rows) > 0) round(mean(case_rows$Global_Meth_Pct, na.rm = TRUE), 1) else NA
+    case_s <- if (nrow(case_rows) > 1) round(sd(case_rows$Global_Meth_Pct, na.rm = TRUE), 1) else NA
+
+    cat('<div class="metric-row">\n')
+    if (!is.na(ctrl_m)) {
+      cat(sprintf('<div class="metric-card"><div class="value" style="color:#27ae60;">%.1f%%</div><div class="label">Control avg%s</div></div>\n',
+                  ctrl_m, if (!is.na(ctrl_s)) sprintf(" (+/- %.1f)", ctrl_s) else ""))
+    }
+    if (!is.na(case_m)) {
+      cat(sprintf('<div class="metric-card"><div class="value" style="color:#e74c3c;">%.1f%%</div><div class="label">Case avg%s</div></div>\n',
+                  case_m, if (!is.na(case_s)) sprintf(" (+/- %.1f)", case_s) else ""))
+    }
+    if (!is.na(ctrl_m) && !is.na(case_m)) {
+      delta <- round(case_m - ctrl_m, 1)
+      delta_col <- if (abs(delta) > 5) "#e74c3c" else "#95a5a6"
+      cat(sprintf('<div class="metric-card"><div class="value" style="color:%s;">%+.1f%%</div><div class="label">Delta (Case - Control)</div></div>\n',
+                  delta_col, delta))
+    }
+    cat('</div>\n\n')
+  }
+
+  # ── Per-sample barplot ──
+  group_colors <- c("Control (0)" = "#27ae60", "Case (1)" = "#e74c3c", "Unknown" = "#95a5a6")
+
+  if ("Group" %in% colnames(df_global_meth)) {
+    p_bar <- ggplot(df_global_meth,
+                     aes(x = reorder(Sample, Global_Meth_Pct),
+                         y = Global_Meth_Pct, fill = Group)) +
+      geom_bar(stat = "identity", color = "white", linewidth = 0.3) +
+      scale_fill_manual(values = group_colors) +
+      coord_flip() +
+      labs(title = "Global Methylation per Sample",
+           x = "", y = "Global Methylation (%)", fill = "Group") +
+      theme_minimal(base_size = 12)
+  } else {
+    p_bar <- ggplot(df_global_meth,
+                     aes(x = reorder(Sample, Global_Meth_Pct),
+                         y = Global_Meth_Pct)) +
+      geom_bar(stat = "identity", fill = "#3498db") +
+      coord_flip() +
+      labs(title = "Global Methylation per Sample",
+           x = "", y = "Global Methylation (%)") +
+      theme_minimal(base_size = 12)
+  }
+  print(p_bar)
+  cat("\n\n")
+
+  # ── Boxplot Control vs Case ──
+  if ("Group" %in% colnames(df_global_meth)) {
+    gm_plot <- df_global_meth[df_global_meth$Group != "Unknown", ]
+    if (nrow(gm_plot) > 0 && length(unique(gm_plot$Group)) >= 2) {
+      p_box <- ggplot(gm_plot,
+                       aes(x = Group, y = Global_Meth_Pct, fill = Group)) +
+        geom_boxplot(alpha = 0.4, outlier.shape = NA, width = 0.5) +
+        geom_jitter(width = 0.15, size = 3, alpha = 0.8,
+                     aes(colour = Group)) +
+        scale_fill_manual(values = group_colors) +
+        scale_colour_manual(values = group_colors) +
+        labs(title = "Global Methylation: Control vs Case",
+             subtitle = if (!is.na(ctrl_m) && !is.na(case_m))
+               sprintf("CTL: %.1f%% | Case: %.1f%% | Delta: %+.1f%%",
+                       ctrl_m, case_m, case_m - ctrl_m) else "",
+             x = "", y = "Global Methylation (%)") +
+        theme_minimal(base_size = 13) +
+        theme(legend.position = "none")
+      print(p_box)
+    }
+  }
+
+  cat("\n\n")
+
+  # ── Data table ──
+  cols_show <- intersect(
+    c("Sample", "Global_Meth_Pct", "N_Positions", "Total_Reads", "Group"),
+    colnames(df_global_meth))
+  dt <- datatable(df_global_meth[, cols_show],
+                  options = list(dom = "t", pageLength = 25),
+                  caption = "Global methylation per sample")
+  if ("Global_Meth_Pct" %in% cols_show) {
+    dt <- DT::formatRound(dt, columns = "Global_Meth_Pct", digits = 2)
+  }
+  if ("Group" %in% cols_show) {
+    dt <- DT::formatStyle(dt, "Group",
+                           color = DT::styleEqual(
+                             c("Control (0)", "Case (1)"),
+                             c("#27ae60", "#e74c3c")),
+                           fontWeight = "bold")
+  }
+  dt
+
+} else {
+  cat("Global methylation data not available.\n")
+}
+```
+
+---
+
+# Methylation Profile by Chromosome
+
+```{r meth_profile_bar, fig.height=8}
+if (!is.null(df_meth) && nrow(df_meth) > 0) {
+
+  chr_levels <- c(paste0("chr", 1:22), "chrX", "chrY", "chrM")
+  present    <- intersect(chr_levels, unique(df_meth$chr))
+  others     <- setdiff(unique(df_meth$chr), chr_levels)
+  df_meth$chr <- factor(df_meth$chr,
+                          levels = c(present, sort(others)))
+
+  p <- ggplot(df_meth,
+              aes(x = chr, y = avg_methylation, fill = Sample,
+                  text = paste0("Sample: ", Sample,
+                                "<br>Chr: ", chr,
+                                "<br>Meth: ",
+                                round(avg_methylation, 1), "%"))) +
+    geom_bar(stat = "identity", position = "dodge") +
+    labs(title = "Average Methylation per Chromosome",
+         y = "Methylation (%)", x = "") +
+    theme_minimal(base_size = 12) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1,
+                                      vjust = 0.5))
+
+  ggplotly(p, tooltip = "text")
+} else {
+  cat("Methylation profile data not available.")
+}
+```
+
+```{r meth_heatmap, fig.height=7}
+if (!is.null(df_meth) && nrow(df_meth) > 0) {
+
+  mat <- tidyr::pivot_wider(
+    df_meth[, c("Sample", "chr", "avg_methylation")],
+    names_from = Sample,
+    values_from = avg_methylation)
+
+  chr_col <- mat$chr
+  mat$chr <- NULL
+  mat_num <- as.matrix(mat)
+  rownames(mat_num) <- chr_col
+
+  if (nrow(mat_num) > 1 && ncol(mat_num) > 1) {
+    p_heat <- plot_ly(
+      z = mat_num,
+      x = colnames(mat_num),
+      y = rownames(mat_num),
+      type = "heatmap",
+      colorscale = list(c(0, "#3498db"), c(0.5, "#f1c40f"),
+                        c(1, "#e74c3c")),
+      zmin = 0, zmax = 100
+    ) %>%
+      layout(
+        title = "Methylation Heatmap (Samples x Chromosomes)",
+        xaxis = list(title = ""),
+        yaxis = list(title = "", autorange = "reversed"))
+
+    p_heat
+  }
+}
+```
+
+## Per-Sample Methylation Distribution
+
+```{r meth_boxplot}
+if (!is.null(df_meth) && nrow(df_meth) > 0) {
+  p <- ggplot(df_meth,
+              aes(x = Sample, y = avg_methylation,
+                  fill = Sample)) +
+    geom_boxplot(alpha = 0.7, outlier.size = 1) +
+    labs(title = "Methylation Distribution per Sample",
+         y = "Methylation (%)", x = "") +
+    theme_minimal(base_size = 12) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none")
+
+  ggplotly(p)
+}
+```
+
+---
+
+# Control Genomes {.tabset}
+
+## All Samples (including excluded)
+
+```{r controls_all, fig.height=6, results='asis'}
+if (!is.null(df_controls_merged) && nrow(df_controls_merged) > 0) {
+
+  cat('<div class="qc-box">\n')
+  cat('<h4>Control Genome Methylation</h4>\n')
+  cat('<table class="table table-bordered" style="width:auto; margin:10px 0;">\n')
+  cat('<thead><tr><th>Control</th><th>Expected</th><th>Interpretation</th></tr></thead>\n')
+  cat('<tbody>\n')
+  cat('<tr><td><strong>pUC19</strong></td>')
+  cat('<td style="color:#c0392b; font-weight:bold;">~100%</td>')
+  cat('<td>Methylated spike-in. Low methylation = over-conversion.</td></tr>\n')
+  cat('<tr><td><strong>NC_000913 (E. coli)</strong></td>')
+  cat('<td style="color:#2980b9; font-weight:bold;">~0%</td>')
+  cat('<td>Unmethylated control. High methylation = incomplete conversion.</td></tr>\n')
+  cat('<tr><td><strong>Lambda</strong></td>')
+  cat('<td style="color:#2980b9; font-weight:bold;">~0%</td>')
+  cat('<td>Unmethylated control. High methylation = incomplete conversion.</td></tr>\n')
+  cat('</tbody></table>\n')
+
+  excl_names <- unique(
+    df_controls_merged$Sample[df_controls_merged$Status == "Excluded"])
+  if (length(excl_names) > 0) {
+    cat(sprintf(
+      '<p><strong>Note:</strong> Includes %d excluded sample(s): %s (marked with *)</p>\n',
+      length(excl_names), paste(excl_names, collapse = ", ")))
+  }
+  cat('</div>\n\n')
+
+  # ── Labels ──
+  df_controls_merged$SampleLabel <- ifelse(
+    df_controls_merged$Status == "Excluded",
+    paste0(df_controls_merged$Sample, " *"),
+    df_controls_merged$Sample
+  )
+
+  if ("ExpectedMeth" %in% colnames(df_controls_merged)) {
+    df_controls_merged$ControlType <- ifelse(
+      df_controls_merged$ExpectedMeth == "high",
+      paste0(df_controls_merged$Chromosome, " (expect HIGH)"),
+      paste0(df_controls_merged$Chromosome, " (expect LOW)")
+    )
+  } else {
+    df_controls_merged$ControlType <- df_controls_merged$Chromosome
+  }
+
+  # ── Pure plotly (no static image) ──
+  p <- plot_ly(df_controls_merged,
+               x = ~SampleLabel,
+               y = ~MethylationPercentage,
+               color = ~ControlType,
+               type = "bar",
+               text = ~paste0("Sample: ", Sample,
+                              "<br>Status: ", Status,
+                              "<br>Control: ", Chromosome,
+                              if ("ExpectedMeth" %in% colnames(df_controls_merged))
+                                paste0("<br>Expected: ", ExpectedMeth)
+                              else "",
+                              "<br>Meth: ",
+                              round(MethylationPercentage, 2), "%"),
+               hoverinfo = "text") %>%
+    layout(
+      title = "Control Genome Methylation -- All Samples",
+      xaxis = list(title = "", tickangle = 45),
+      yaxis = list(title = "Methylation (%)", range = c(0, 105)),
+      barmode = "group",
+      shapes = list(
+        list(type = "line", x0 = 0, x1 = 1, xref = "paper",
+             y0 = 5, y1 = 5, line = list(color = "red", dash = "dash", width = 1)),
+        list(type = "line", x0 = 0, x1 = 1, xref = "paper",
+             y0 = 95, y1 = 95, line = list(color = "darkgreen", dash = "dash", width = 1))
+      ),
+      annotations = list(
+        list(x = 0.01, y = 7, xref = "paper", yref = "y",
+             text = "5% unmeth. threshold", showarrow = FALSE,
+             font = list(color = "red", size = 10)),
+        list(x = 0.01, y = 92, xref = "paper", yref = "y",
+             text = "95% meth. threshold", showarrow = FALSE,
+             font = list(color = "darkgreen", size = 10))
+      )
+    )
+
+  p
+
+} else {
+  cat('<div class="qc-box ok-card">\n')
+  cat('<h4>Control Genomes</h4>\n')
+  cat('<p>No control genome data detected (pUC19, Lambda, etc.). ')
+  cat('This is normal if spike-in controls were not used.</p>\n')
+  cat('</div>\n')
+}
+```
+
+## Analysed Samples Only
+
+```{r controls_analysed, fig.height=5}
+if (!is.null(df_controls_merged) && nrow(df_controls_merged) > 0) {
+
+  df_ctrl_current <- df_controls_merged[df_controls_merged$Status == "Analysed", ]
+
+  if (nrow(df_ctrl_current) > 0) {
+
+    if ("ExpectedMeth" %in% colnames(df_ctrl_current)) {
+      df_ctrl_current$ControlType <- ifelse(
+        df_ctrl_current$ExpectedMeth == "high",
+        paste0(df_ctrl_current$Chromosome, " (expect HIGH)"),
+        paste0(df_ctrl_current$Chromosome, " (expect LOW)")
+      )
+    } else {
+      df_ctrl_current$ControlType <- df_ctrl_current$Chromosome
+    }
+
+    p <- ggplot(df_ctrl_current,
+                aes(x = Sample, y = MethylationPercentage,
+                    fill = ControlType,
+                    text = paste0("Sample: ", Sample,
+                                  "<br>Control: ", Chromosome,
+                                  if ("ExpectedMeth" %in% colnames(df_ctrl_current))
+                                    paste0("<br>Expected: ", ExpectedMeth)
+                                  else "",
+                                  "<br>Meth: ",
+                                  round(MethylationPercentage, 2), "%"))) +
+      geom_bar(stat = "identity", position = "dodge",
+               color = "white", linewidth = 0.3) +
+      scale_fill_brewer(palette = "Set2") +
+      geom_hline(yintercept = 5, linetype = "dashed",
+                 color = "red", linewidth = 0.5) +
+      geom_hline(yintercept = 95, linetype = "dashed",
+                 color = "darkgreen", linewidth = 0.5) +
+      labs(title = "Control Genome Methylation -- Analysed Samples",
+           y = "Methylation (%)", x = "",
+           fill = "Control") +
+      theme_minimal(base_size = 12) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+    ggplotly(p, tooltip = "text")
+  } else {
+    cat("No control genome data for analysed samples.\n")
+  }
+}
+```
+
+## Data Table
+
+```{r controls_table}
+if (!is.null(df_controls_merged) && nrow(df_controls_merged) > 0) {
+
+  cols_to_show <- intersect(
+    c("Sample", "Chromosome", "ExpectedMeth",
+      "MethylationPercentage", "CpG_Count", "Coverage", "Status"),
+    colnames(df_controls_merged)
+  )
+
+  ctrl_display <- df_controls_merged[, cols_to_show]
+
+  # Add a pass/fail column
+  if ("ExpectedMeth" %in% colnames(ctrl_display)) {
+    ctrl_display$QC_Check <- ifelse(
+      ctrl_display$ExpectedMeth == "high",
+      ifelse(ctrl_display$MethylationPercentage >= 95, "PASS", "WARN"),
+      ifelse(ctrl_display$MethylationPercentage <= 5,  "PASS", "WARN")
+    )
+  }
+
+  dt <- datatable(ctrl_display,
+            options = list(dom = "t", pageLength = 30),
+            caption = "Control genome QC (all samples)")
+
+  if ("MethylationPercentage" %in% colnames(ctrl_display)) {
+    dt <- DT::formatRound(dt, columns = "MethylationPercentage", digits = 2)
+  }
+
+  if ("Status" %in% colnames(ctrl_display)) {
+    dt <- DT::formatStyle(dt, "Status",
+                           backgroundColor = DT::styleEqual(
+                             c("Analysed", "Excluded"),
+                             c("#d5f5e3", "#fadbd8")))
+  }
+
+  if ("QC_Check" %in% colnames(ctrl_display)) {
+    dt <- DT::formatStyle(dt, "QC_Check",
+                           backgroundColor = DT::styleEqual(
+                             c("PASS", "WARN"),
+                             c("#d5f5e3", "#fcf3cf")),
+                           fontWeight = DT::styleEqual(
+                             c("PASS", "WARN"),
+                             c("normal", "bold")))
+  }
+
+  dt
+}
+```
+
+---
+
+# QC Assessment
+
+```{r qc_flags, results='asis'}
+flags <- list()
+
+# ── Flag: control genome checks (differentiated by expected type) ──
+if (!is.null(df_controls_merged) && nrow(df_controls_merged) > 0 &&
+    "ExpectedMeth" %in% colnames(df_controls_merged)) {
+
+  # Unmethylated controls that are too HIGH
+  unmeth <- df_controls_merged[df_controls_merged$ExpectedMeth == "low", ]
+  if (nrow(unmeth) > 0) {
+    bad_unmeth <- unmeth[unmeth$MethylationPercentage > 5, ]
+
+    if (nrow(bad_unmeth) > 0) {
+      bad_analysed <- bad_unmeth[bad_unmeth$Status == "Analysed", ]
+      bad_excluded <- bad_unmeth[bad_unmeth$Status == "Excluded", ]
+
+      if (nrow(bad_analysed) > 0) {
+        flags[[length(flags) + 1]] <- list(
+          level = "WARNING",
+          msg = paste0(
+            "Unmethylated control(s) > 5% in ANALYSED samples: ",
+            paste(unique(paste0(bad_analysed$Sample, "/",
+                                bad_analysed$Chromosome)),
+                  collapse = ", "),
+            ". This indicates INCOMPLETE bisulfite conversion."))
+      }
+      if (nrow(bad_excluded) > 0) {
+        flags[[length(flags) + 1]] <- list(
+          level = "INFO",
+          msg = paste0(
+            "Unmethylated control(s) > 5% in EXCLUDED samples: ",
+            paste(unique(paste0(bad_excluded$Sample, "/",
+                                bad_excluded$Chromosome)),
+                  collapse = ", "),
+            ". (Already excluded.)"))
+      }
+    }
+  }
+
+  # Methylated controls that are too LOW
+  meth <- df_controls_merged[df_controls_merged$ExpectedMeth == "high", ]
+  if (nrow(meth) > 0) {
+    bad_meth <- meth[meth$MethylationPercentage < 95, ]
+
+    if (nrow(bad_meth) > 0) {
+      bad_analysed <- bad_meth[bad_meth$Status == "Analysed", ]
+      bad_excluded <- bad_meth[bad_meth$Status == "Excluded", ]
+
+      if (nrow(bad_analysed) > 0) {
+        flags[[length(flags) + 1]] <- list(
+          level = "WARNING",
+          msg = paste0(
+            "Methylated control(s) < 95% in ANALYSED samples: ",
+            paste(unique(paste0(bad_analysed$Sample, "/",
+                                bad_analysed$Chromosome)),
+                  collapse = ", "),
+            ". This indicates OVER-CONVERSION (bisulfite too aggressive)."))
+      }
+      if (nrow(bad_excluded) > 0) {
+        flags[[length(flags) + 1]] <- list(
+          level = "INFO",
+          msg = paste0(
+            "Methylated control(s) < 95% in EXCLUDED samples: ",
+            paste(unique(paste0(bad_excluded$Sample, "/",
+                                bad_excluded$Chromosome)),
+                  collapse = ", "),
+            ". (Already excluded.)"))
+      }
+    }
+  }
+
+} else if (!is.null(df_controls_merged) && nrow(df_controls_merged) > 0) {
+  # Fallback if no ExpectedMeth column
+  high_ctrl <- df_controls_merged$MethylationPercentage > 5
+  if (any(high_ctrl, na.rm = TRUE)) {
+    bad <- df_controls_merged[high_ctrl, ]
+    flags[[length(flags) + 1]] <- list(
+      level = "WARNING",
+      msg = paste0(
+        "Control genome methylation > 5% detected for: ",
+        paste(unique(bad$Sample), collapse = ", ")))
+  }
+}
+
+# ── Flag: low coverage samples ──
+if (!is.null(df_stats) && nrow(df_stats) > 0) {
+  indiv <- df_stats[df_stats$Type == "Individual", ]
+  if (nrow(indiv) > 1) {
+    med <- median(indiv$PositionCount, na.rm = TRUE)
+    low <- indiv[indiv$PositionCount < med * 0.5, ]
+    if (nrow(low) > 0) {
+      flags[[length(flags) + 1]] <- list(
+        level = "WARNING",
+        msg = paste0(
+          "Low coverage samples (< 50% of median): ",
+          paste(low$Sample, collapse = ", ")))
+    }
+  }
+}
+
+# ── Flag: excluded samples reminder ──
+if (n_excluded > 0) {
+  flags[[length(flags) + 1]] <- list(
+    level = "INFO",
+    msg = paste0(
+      n_excluded, " sample(s) excluded from analysis: ",
+      paste(excluded, collapse = ", ")))
+}
+
+if (length(flags) == 0) {
+  cat('<div class="qc-box ok-card">\n')
+  cat('<h4>All QC Checks Passed</h4>\n')
+  cat('<p>No issues detected.</p>\n')
+  cat('</div>\n')
+} else {
+  for (f in flags) {
+    if (f$level == "WARNING") {
+      cls <- "warn-card"
+      icon <- "WARNING"
+    } else {
+      cls <- "info-card"
+      icon <- "INFO"
+    }
+    cat(sprintf('<div class="qc-box %s">\n', cls))
+    cat(sprintf('<h4>%s</h4>\n', icon))
+    cat(sprintf('<p>%s</p>\n', f$msg))
+    cat('</div>\n')
+  }
+}
+```
+
+---
+
+# Session Info
+
+```{r session}
+sessionInfo()
+```

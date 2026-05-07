@@ -1,0 +1,347 @@
+---
+title: "mETHYLotest EPIC — QC Report"
+date: "`r format(Sys.time(), '%d %B %Y, %H:%M')`"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+    code_folding: hide
+    self_contained: true
+params:
+  qc_data: NULL
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center"
+)
+```
+
+```{r check-params}
+if (is.null(params$qc_data))
+  stop("No QC data provided to the report (qc_data is NULL).")
+
+qc <- params$qc_data
+
+# Helper: section availability badge
+avail_badge <- function(obj, label) {
+  if (!is.null(obj))
+    htmltools::span(
+      class = "label label-success",
+      style = "margin-right:4px;",
+      paste0("\u2713 ", label)
+    )
+  else
+    htmltools::span(
+      class = "label label-default",
+      style = "margin-right:4px; color:#999;",
+      paste0("\u2013 ", label, " (not computed)")
+    )
+}
+```
+
+---
+
+# Dataset Overview
+
+```{r dataset-overview}
+# Build summary from first available plot data
+n_samples <- if (!is.null(qc$pca_prcomp))
+  nrow(qc$pca_prcomp$x) else NA
+n_probes  <- if (!is.null(qc$pca_prcomp))
+  ncol(qc$pca_prcomp$rotation) else NA
+
+htmltools::div(
+  class = "row",
+  htmltools::div(
+    class = "col-sm-6",
+    htmltools::div(
+      class = "panel panel-primary",
+      htmltools::div(class = "panel-heading",
+                     htmltools::strong("QC Sections Computed")),
+      htmltools::div(
+        class = "panel-body",
+        avail_badge(qc$plots$pca_plot,      "PCA"),
+        avail_badge(qc$plots$tsne_plot,     "t-SNE"),
+        avail_badge(qc$plots$svd_plot,      "SVD"),
+        avail_badge(qc$plots$beta_density,  "Beta Distribution"),
+        avail_badge(qc$plots$cor_heatmap,   "Sample Correlation"),
+        avail_badge(qc$plots$detp_summary,  "Detection P-value"),
+        avail_badge(qc$plots$sex_pred,      "Sex Prediction")
+      )
+    )
+  ),
+  htmltools::div(
+    class = "col-sm-6",
+    htmltools::div(
+      class = "panel panel-info",
+      htmltools::div(class = "panel-heading",
+                     htmltools::strong("Report Parameters")),
+      htmltools::div(
+        class = "panel-body",
+        htmltools::tags$table(
+          class = "table table-condensed",
+          style = "margin:0;",
+          htmltools::tags$tr(
+            htmltools::tags$td(htmltools::strong("Samples")),
+            htmltools::tags$td(if (!is.na(n_samples)) n_samples else "—")
+          ),
+          htmltools::tags$tr(
+            htmltools::tags$td(htmltools::strong("CpG Probes")),
+            htmltools::tags$td(if (!is.na(n_probes))
+              format(n_probes, big.mark = ",") else "—")
+          ),
+          htmltools::tags$tr(
+            htmltools::tags$td(htmltools::strong("Generated")),
+            htmltools::tags$td(format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
+          )
+        )
+      )
+    )
+  )
+)
+```
+
+---
+
+# Dimensionality Reduction
+
+## Principal Component Analysis (PCA)
+
+> PC1 and PC2 capture the largest sources of variance across samples.
+> Outlier samples appear isolated from the main cluster.
+
+```{r pca-plot, fig.height=6}
+if (!is.null(qc$plots$pca_plot)) {
+  print(qc$plots$pca_plot)
+} else {
+  htmltools::div(class = "alert alert-warning",
+                 "PCA plot not generated.")
+}
+```
+
+## t-SNE
+
+> t-SNE is a non-linear dimensionality reduction technique.
+> Useful for visualising cluster structure not captured by PCA.
+> Note: perplexity was adapted to the sample size.
+
+```{r tsne-plot, fig.height=6}
+if (!is.null(qc$plots$tsne_plot)) {
+  print(qc$plots$tsne_plot)
+} else {
+  htmltools::div(class = "alert alert-warning",
+                 "t-SNE plot not generated.")
+}
+```
+
+---
+
+# Covariate Association
+
+## SVD Covariate Correlation Heatmap
+
+> Each cell shows the correlation between a principal component and a
+> phenotype variable. Significant associations (BH-corrected) are marked
+> with asterisks. Strong associations with technical variables
+> (e.g. batch, plate) indicate potential confounding.
+
+```{r svd-plot, fig.height=7}
+if (!is.null(qc$plots$svd_plot)) {
+  print(qc$plots$svd_plot)
+} else {
+  htmltools::div(class = "alert alert-warning",
+                 "SVD heatmap not generated (requires >= 2 numeric/factor",
+                 " covariates beyond reserved columns).")
+}
+```
+
+---
+
+# Methylation Distribution
+
+## Beta Value Distribution
+
+> Expected shape: bimodal (peaks near 0 = unmethylated, near 1 = methylated).
+> A unimodal or flat distribution indicates a problematic sample.
+> All curves should overlap — divergent samples are potential outliers.
+
+```{r beta-density, fig.height=6}
+if (!is.null(qc$plots$beta_density)) {
+  # Native plotly object
+  qc$plots$beta_density
+} else {
+  htmltools::div(class = "alert alert-warning",
+                 "Beta density plot not generated.")
+}
+```
+
+---
+
+# Sample Quality
+
+## Sample Correlation Heatmap
+
+> High-quality cohorts show uniformly high inter-sample correlation
+> (typically > 0.95 for EPIC arrays). Samples with systematically
+> lower correlation may indicate degraded DNA or labelling errors.
+> Samples flagged as potential outliers are noted below the heatmap.
+
+```{r cor-heatmap, fig.height=7}
+if (!is.null(qc$plots$cor_heatmap)) {
+  # Native plotly object
+  qc$plots$cor_heatmap
+} else {
+  htmltools::div(class = "alert alert-warning",
+                 "Correlation heatmap not generated.")
+}
+```
+
+## Detection P-value Summary
+
+> Probes with detection p-value > threshold are considered unreliable.
+> The red dashed line marks the 5% failure threshold — samples exceeding
+> this should be considered for removal.
+
+```{r detp-plot, fig.height=5}
+if (!is.null(qc$plots$detp_summary)) {
+  print(qc$plots$detp_summary)
+} else {
+  htmltools::div(
+    class = "alert alert-warning",
+    "Detection p-value summary not generated. ",
+    htmltools::tags$br(),
+    "This requires ",
+    htmltools::tags$code("myLoad$detP"),
+    " — use ",
+    htmltools::tags$code('method = "minfi"'),
+    " in ",
+    htmltools::tags$code("champ.load()"),
+    " or provide the IDAT directory to compute detP post-hoc."
+  )
+}
+```
+
+## Sex Prediction
+
+> Sex is predicted from median beta values on chrX and chrY probes.
+> Mismatches between declared and predicted sex are highlighted in red
+> and should be carefully verified.
+
+```{r sex-pred-plot, fig.height=5}
+sex_pred <- qc$plots$sex_pred
+
+if (!is.null(sex_pred) && !is.null(sex_pred$plot)) {
+  print(sex_pred$plot)
+} else {
+  htmltools::div(class = "alert alert-warning",
+                 "Sex prediction plot not generated.")
+}
+```
+
+```{r sex-pred-table}
+if (!is.null(sex_pred) && !is.null(sex_pred$data)) {
+
+  df_sex <- sex_pred$data
+
+  # Alert for mismatches
+  mm <- sex_pred$mismatches
+  if (length(mm) > 0L) {
+    htmltools::div(
+      class = "alert alert-danger",
+      htmltools::strong(paste0(length(mm), " sex mismatch(es) detected: ")),
+      paste(mm, collapse = ", ")
+    )
+  } else if ("Match" %in% colnames(df_sex)) {
+    htmltools::div(
+      class = "alert alert-success",
+      "All declared and predicted sex values match."
+    )
+  }
+
+  # Table
+  DT::datatable(
+    df_sex,
+    rownames = FALSE,
+    options  = list(dom = "tp", pageLength = 15, scrollX = TRUE),
+    class    = "stripe hover compact"
+  ) %>%
+    DT::formatStyle(
+      if ("Match" %in% colnames(df_sex)) "Match" else character(0),
+      backgroundColor = DT::styleEqual(
+        c("Match",   "Mismatch"),
+        c("#d4edda", "#f8d7da")
+      ),
+      color = DT::styleEqual(
+        c("Match",   "Mismatch"),
+        c("#155724", "#721c24")
+      ),
+      fontWeight = "bold"
+    ) %>%
+    DT::formatStyle(
+      "Predicted_Sex",
+      color = DT::styleEqual(
+        c("Male",    "Female"),
+        c("#1a5276", "#922b21")
+      ),
+      fontWeight = "bold"
+    )
+
+} else {
+  htmltools::div(class = "alert alert-warning",
+                 "Sex prediction data not available.")
+}
+```
+
+---
+
+# Session Information
+
+```{r session-info}
+si <- sessionInfo()
+
+htmltools::div(
+  class = "panel panel-default",
+  htmltools::div(class = "panel-heading",
+                 htmltools::strong("R Session Info")),
+  htmltools::div(
+    class = "panel-body",
+    htmltools::tags$table(
+      class = "table table-condensed table-bordered",
+      style = "font-size:12px;",
+      htmltools::tags$tbody(
+        htmltools::tags$tr(
+          htmltools::tags$td(htmltools::strong("R version")),
+          htmltools::tags$td(si$R.version$version.string)
+        ),
+        htmltools::tags$tr(
+          htmltools::tags$td(htmltools::strong("Platform")),
+          htmltools::tags$td(si$R.version$platform)
+        ),
+        htmltools::tags$tr(
+          htmltools::tags$td(htmltools::strong("Key packages")),
+          htmltools::tags$td(
+            paste(
+              sapply(
+                intersect(c("mETHYLotest", "ChAMP", "minfi", "PCAtools",
+                            "Rtsne", "plotly", "shiny"),
+                          names(si$otherPkgs)),
+                function(p) paste0(p, " v", si$otherPkgs[[p]]$Version)
+              ),
+              collapse = ", "
+            )
+          )
+        )
+      )
+    )
+  )
+)
+```

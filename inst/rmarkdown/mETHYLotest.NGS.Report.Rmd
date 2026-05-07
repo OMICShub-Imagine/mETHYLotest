@@ -1,0 +1,746 @@
+---
+title: "mETHYLotest NGS Analysis Report"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    code_folding: hide
+    df_print: paged
+    self_contained: true
+params:
+  project_dir: ""
+  analyzed_samples: !r NULL
+  excluded_samples: !r NULL
+---
+
+```{=html}
+<style>
+.summary-box {
+  background: #f8f9fa; border-radius: 5px;
+  border-left: 4px solid #2980b9; padding: 12px 15px;
+  margin-bottom: 15px;
+}
+.summary-box h4 { margin: 0 0 8px 0; color: #2980b9; }
+.summary-box p { margin: 2px 0; }
+.metric-row { display: flex; gap: 15px; margin: 15px 0; flex-wrap: wrap; }
+.metric-card {
+  flex: 1; text-align: center; padding: 15px;
+  border-radius: 5px; background: #f5f5f5;
+  border: 1px solid #e3e3e3; min-width: 120px;
+}
+.metric-card .value { font-size: 2em; font-weight: bold; }
+.metric-card .label { color: #666; font-size: 0.9em; }
+.sig-card {
+  display: inline-block; text-align: center; padding: 12px 20px;
+  border-radius: 8px; color: #fff; margin: 5px; min-width: 110px;
+}
+.sig-card .big-num { font-size: 24px; font-weight: bold; line-height: 1.2; }
+.sig-card .label { font-size: 11px; opacity: .85; }
+.warn-box {
+  background: #fdf2e9; border-left: 4px solid #e67e22;
+  padding: 12px 15px; border-radius: 4px; margin: 10px 0;
+}
+.excluded-box {
+  background: #fdedec; border-left: 4px solid #e74c3c;
+  padding: 12px 15px; border-radius: 4px; margin: 10px 0;
+}
+.good-box {
+  background: #d5f5e3; border-left: 4px solid #27ae60;
+  padding: 12px 15px; border-radius: 4px; margin: 10px 0;
+}
+.info-box {
+  background: #eaf2f8; border-left: 4px solid #3498db;
+  padding: 12px 15px; border-radius: 4px; margin: 10px 0;
+}
+img { max-width: 100% !important; height: auto !important; }
+</style>
+```
+
+```{r setup, include=FALSE}
+# ── Force figures to a LOCAL temp dir (avoids UNC/pandoc bug) ──
+local_fig_dir <- file.path(tempdir(), "mETHYLotest_report_figs/")
+if (!dir.exists(local_fig_dir)) dir.create(local_fig_dir, recursive = TRUE)
+
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE,
+  fig.width = 10, fig.height = 6, dpi = 100, out.width = "100%",
+  fig.path = local_fig_dir
+)
+
+library(ggplot2)
+library(knitr)
+
+has_dt       <- requireNamespace("DT",        quietly = TRUE)
+has_readxl   <- requireNamespace("readxl",    quietly = TRUE)
+has_base64   <- requireNamespace("base64enc", quietly = TRUE)
+has_pheatmap <- requireNamespace("pheatmap",  quietly = TRUE)
+
+config_file <- file.path(params$project_dir, "Results", "project_config.R")
+if (!file.exists(config_file)) stop("Config not found: ", config_file)
+
+source(config_file)
+cfg <- project_config
+res_dir <- cfg$res_dir
+robject_dir <- project_config$rds_dir
+
+diff_cutoff_report <- if (!is.null(cfg$diff_cutoff)) cfg$diff_cutoff else 10
+diff_qvalue_report <- if (!is.null(cfg$diff_qvalue)) cfg$diff_qvalue else 0.05
+
+# ── Pheno ──
+pheno_all <- NULL
+if (has_readxl && !is.null(cfg$pheno_file) && file.exists(cfg$pheno_file)) {
+  pheno_all <- as.data.frame(readxl::read_excel(cfg$pheno_file))
+}
+
+# ── Preload diff_results ──
+diff_rds_path <- file.path(robject_dir, "diff_results_list.rds")
+diff_results <- NULL
+if (file.exists(diff_rds_path)) {
+  diff_results <- tryCatch(readRDS(diff_rds_path), error = function(e) NULL)
+}
+
+# ── Preload validation results ──
+val_results <- NULL
+val_rds_candidates <- c(
+  file.path(robject_dir, "validation_results.rds"),
+  file.path(robject_dir, "Validation", "validation_results.rds")
+)
+for (vp in val_rds_candidates) {
+  if (file.exists(vp)) {
+    val_results <- tryCatch(readRDS(vp), error = function(e) NULL)
+    if (!is.null(val_results)) break
+  }
+}
+has_val <- is.list(val_results) && length(val_results) > 0
+
+# ── methylBase ──
+meth_obj <- NULL
+meth_rds <- file.path(robject_dir, "methylBase_united.rds")
+if (file.exists(meth_rds)) {
+  meth_obj <- tryCatch(readRDS(meth_rds), error = function(e) NULL)
+  if (!is.null(meth_obj) && !inherits(meth_obj, "methylBase")) meth_obj <- NULL
+}
+
+# ── Analyzed / Excluded IDs ──
+analyzed_ids <- params$analyzed_samples
+excluded_ids <- if (!is.null(params$excluded_samples)) params$excluded_samples else character(0)
+
+if (is.null(analyzed_ids)) {
+  if (!is.null(diff_results) && length(diff_results) > 0) {
+    first_obj <- diff_results[[1]]
+    if (inherits(first_obj, "methylDiff")) {
+      analyzed_ids <- tryCatch(methylKit::getSampleID(first_obj), error = function(e) NULL)
+    }
+  }
+}
+if (is.null(analyzed_ids) && !is.null(meth_obj)) {
+  analyzed_ids <- tryCatch(methylKit::getSampleID(meth_obj), error = function(e) NULL)
+}
+
+if (length(excluded_ids) == 0 && !is.null(pheno_all) && !is.null(analyzed_ids) &&
+    !is.null(cfg$col_sampleID) && cfg$col_sampleID %in% colnames(pheno_all)) {
+  excluded_ids <- setdiff(as.character(pheno_all[[cfg$col_sampleID]]), analyzed_ids)
+}
+
+pheno_analyzed <- NULL
+if (!is.null(pheno_all) && !is.null(analyzed_ids) &&
+    !is.null(cfg$col_sampleID) && cfg$col_sampleID %in% colnames(pheno_all)) {
+  pheno_analyzed <- pheno_all[pheno_all[[cfg$col_sampleID]] %in% analyzed_ids, ]
+}
+
+# ── Helpers ──
+embed_img <- function(img_path) {
+  if (!file.exists(img_path)) return(NULL)
+  if (has_base64) {
+    raw <- readBin(img_path, "raw", file.info(img_path)$size)
+    b64 <- base64enc::base64encode(raw)
+    sprintf('<img src="data:image/png;base64,%s" style="max-width:100%%;" />', b64)
+  } else {
+    sprintf('![%s](%s)', basename(img_path), img_path)
+  }
+}
+
+sig_card <- function(value, label, bg) {
+  sprintf('<div class="sig-card" style="background:%s;"><span class="big-num">%s</span><br><span class="label">%s</span></div>',
+          bg, value, label)
+}
+```
+
+# Project Summary
+
+```{r project_summary, results='asis'}
+cat('<div class="summary-box">\n')
+cat('<h4>Project Information</h4>\n')
+cat(sprintf('<p><strong>Name:</strong> %s</p>\n', cfg$project_name))
+cat(sprintf('<p><strong>Assembly:</strong> %s</p>\n', cfg$assembly))
+cat(sprintf('<p><strong>Context:</strong> %s</p>\n', cfg$context))
+cat(sprintf('<p><strong>Min Coverage:</strong> %dx</p>\n', cfg$min_coverage))
+
+pip_str <- if (is.list(cfg$pipeline)) "Custom column mapping" else as.character(cfg$pipeline)
+cat(sprintf('<p><strong>Pipeline:</strong> %s</p>\n', pip_str))
+if (is.list(cfg$pipeline) && !is.null(cfg$coord_offset) && cfg$coord_offset != 0L)
+  cat(sprintf('<p><strong>Coordinate Offset:</strong> %d</p>\n', cfg$coord_offset))
+
+cat(sprintf('<p><strong>Clustering:</strong> %s / %s</p>\n', cfg$cluster_dist, cfg$cluster_method))
+cat(sprintf('<p><strong>DiffMeth:</strong> %s / %s (cutoff=%d%%, q&lt;%s)</p>\n',
+            cfg$diff_overdispersion, cfg$diff_test, diff_cutoff_report, diff_qvalue_report))
+if (isTRUE(cfg$perform_batch_correction))
+  cat(sprintf('<p><strong>Batch correction:</strong> %s</p>\n', paste(cfg$batch_cols, collapse = ", ")))
+if (isTRUE(cfg$perform_covariate_adj))
+  cat(sprintf('<p><strong>Covariates:</strong> %s</p>\n', paste(cfg$covariates, collapse = ", ")))
+cat('</div>\n')
+```
+
+## Samples
+
+```{r samples_table, results='asis'}
+if (!is.null(pheno_all) && !is.null(cfg$col_treatment)) {
+  if (!is.null(pheno_analyzed) && nrow(pheno_analyzed) > 0) {
+    tx_vals <- as.numeric(as.character(pheno_analyzed[[cfg$col_treatment]]))
+    n_analyzed <- nrow(pheno_analyzed)
+    n_ctrl <- sum(tx_vals == 0, na.rm = TRUE)
+    n_case <- sum(tx_vals == 1, na.rm = TRUE)
+  } else {
+    n_analyzed <- length(analyzed_ids)
+    n_ctrl <- NA; n_case <- NA
+  }
+
+  cat('<div class="metric-row">\n')
+  cat(sprintf('<div class="metric-card"><div class="value">%d</div><div class="label">Original</div></div>\n', nrow(pheno_all)))
+  cat(sprintf('<div class="metric-card"><div class="value" style="color:#2980b9;">%d</div><div class="label">Analyzed</div></div>\n', n_analyzed))
+  if (!is.na(n_ctrl)) {
+    cat(sprintf('<div class="metric-card"><div class="value" style="color:#27ae60;">%d</div><div class="label">Controls</div></div>\n', n_ctrl))
+    cat(sprintf('<div class="metric-card"><div class="value" style="color:#e74c3c;">%d</div><div class="label">Cases</div></div>\n', n_case))
+  }
+  if (length(excluded_ids) > 0)
+    cat(sprintf('<div class="metric-card"><div class="value" style="color:#e67e22;">%d</div><div class="label">Excluded</div></div>\n', length(excluded_ids)))
+  cat('</div>\n\n')
+
+  if (length(excluded_ids) > 0) {
+    cat('<div class="excluded-box">\n')
+    cat(sprintf('<strong>Excluded (%d):</strong> %s\n', length(excluded_ids), paste(excluded_ids, collapse = ", ")))
+    cat('<br><em>Removed during QC.</em>\n</div>\n\n')
+  }
+
+  display_pheno <- pheno_all
+  sid_col <- cfg$col_sampleID
+  display_pheno$Status <- ifelse(display_pheno[[sid_col]] %in% excluded_ids, "Excluded",
+                          ifelse(display_pheno[[sid_col]] %in% analyzed_ids, "Analyzed", "Unknown"))
+  display_pheno <- display_pheno[order(display_pheno$Status != "Analyzed"), ]
+
+  # ── Remove path columns from display ──
+  hide_cols <- c("Path", "path", "FILE", "File", "file")
+  if (!is.null(cfg$col_file_path)) hide_cols <- c(hide_cols, cfg$col_file_path)
+  display_pheno <- display_pheno[, !colnames(display_pheno) %in% hide_cols, drop = FALSE]
+  
+  if (has_dt) {
+    DT::datatable(display_pheno, options = list(pageLength = 15, scrollX = TRUE)) |>
+      DT::formatStyle("Status", backgroundColor = DT::styleEqual(
+        c("Analyzed", "Excluded"), c("#d5f5e3", "#fadbd8")))
+  } else {
+    knitr::kable(display_pheno, format = "html", row.names = FALSE,
+                 table.attr = 'class="table table-striped"')
+  }
+} else { cat("Phenotype not available.\n") }
+```
+
+---
+
+# Quality Control {.tabset}
+
+```{r qc_images, results='asis'}
+qc_base <- file.path(res_dir, "QC")
+if (dir.exists(qc_base)) {
+  cov_dirs <- list.dirs(qc_base, recursive = FALSE, full.names = TRUE)
+  cov_dirs <- cov_dirs[grepl("cov_", basename(cov_dirs))]
+  if (length(cov_dirs) > 0) {
+    cov_vals <- as.numeric(gsub("cov_", "", basename(cov_dirs)))
+    cov_dirs <- cov_dirs[order(cov_vals)]
+
+    for (qc_dir in cov_dirs) {
+      cat(sprintf("\n\n## %s\n\n", gsub("_", " ", basename(qc_dir))))
+      pngs <- list.files(qc_dir, "\\.png$", full.names = TRUE, recursive = TRUE)
+      if (length(pngs) == 0) { cat("No plots.\n"); next }
+      rel <- gsub(paste0("^", normalizePath(qc_dir, winslash = "/"), "/?"), "",
+                   normalizePath(pngs, winslash = "/"))
+      subs <- dirname(rel); subs[subs == "."] <- "General"
+      for (sd in unique(subs)) {
+        cat(sprintf("\n\n### %s\n\n", gsub("[/_]", " ", sd)))
+        for (img in pngs[subs == sd]) {
+          h <- embed_img(img)
+          if (!is.null(h)) cat(sprintf("\n\n#### %s\n\n%s\n\n", tools::file_path_sans_ext(basename(img)), h))
+        }
+      }
+    }
+  } else { cat("No QC plots found.\n") }
+} else { cat("QC directory not found.\n") }
+```
+
+---
+
+# Comparative Analysis
+
+```{r comp_analysis, results='asis'}
+fig_dir <- file.path(res_dir, "Comparative_Analysis", "figures")
+
+cat("## Sample Correlation\n\n")
+h <- embed_img(file.path(fig_dir, "Sample_Correlation.png"))
+if (!is.null(h)) cat(h) else cat("Not found.\n")
+
+cat("\n\n## Hierarchical Clustering\n\n")
+h <- embed_img(file.path(fig_dir, "Sample_Clustering.png"))
+if (!is.null(h)) cat(h) else cat("Not found.\n")
+
+if (!is.null(meth_obj)) {
+  cat(sprintf('\n\n<div class="summary-box"><h4>United methylBase</h4>\n'))
+  cat(sprintf('<p><strong>Common CpGs:</strong> %s</p>\n', format(nrow(meth_obj), big.mark = ",")))
+  cat(sprintf('<p><strong>Samples:</strong> %d</p></div>\n', length(methylKit::getSampleID(meth_obj))))
+}
+```
+
+---
+
+# Differential Methylation {.tabset}
+
+## Summary
+
+```{r diffmeth_summary, results='asis'}
+summary_df <- NULL
+
+if (!is.null(diff_results) && length(diff_results) > 0) {
+  cat('<div class="summary-box"><h4>Thresholds</h4>\n')
+  cat(sprintf('<p>|diff| &ge; %d%%, q &lt; %s</p></div>\n\n', diff_cutoff_report, diff_qvalue_report))
+
+  cutoffs <- sort(unique(c(diff_cutoff_report, 5, 10, 15, 25)))
+
+  summary_rows <- lapply(names(diff_results), function(model) {
+    raw_df <- tryCatch(methylKit::getData(diff_results[[model]]), error = function(e) NULL)
+    if (is.null(raw_df)) return(NULL)
+    raw_df <- raw_df[!is.na(raw_df$qvalue) & !is.na(raw_df$meth.diff), ]
+    row <- data.frame(Scenario = model, Total = nrow(raw_df), stringsAsFactors = FALSE)
+    for (cut in cutoffs) {
+      sig <- raw_df$qvalue < diff_qvalue_report & abs(raw_df$meth.diff) >= cut
+      row[[paste0("DMC_", cut, "pct")]] <- sum(sig)
+    }
+    sig_cfg <- raw_df$qvalue < diff_qvalue_report & abs(raw_df$meth.diff) >= diff_cutoff_report
+    row$Hyper <- sum(sig_cfg & raw_df$meth.diff > 0)
+    row$Hypo  <- sum(sig_cfg & raw_df$meth.diff < 0)
+    row
+  })
+  summary_df <- do.call(rbind, summary_rows)
+
+  if (!is.null(summary_df) && nrow(summary_df) > 0) {
+    dmc_col <- paste0("DMC_", diff_cutoff_report, "pct")
+
+    # ── Metric cards for EACH scenario ──
+    for (i in seq_len(nrow(summary_df))) {
+      row <- summary_df[i, ]
+      cat(sprintf('<h4>%s</h4>\n', row$Scenario))
+      cat('<div class="metric-row">\n')
+      cat(sprintf('<div class="metric-card"><div class="value">%s</div><div class="label">Tested</div></div>\n',
+                  format(row$Total, big.mark = ",")))
+      cat(sprintf('<div class="metric-card"><div class="value" style="color:#e74c3c;">%s</div><div class="label">DMCs</div></div>\n',
+                  format(row[[dmc_col]], big.mark = ",")))
+      cat(sprintf('<div class="metric-card"><div class="value" style="color:#c0392b;">%s</div><div class="label">Hyper</div></div>\n',
+                  format(row$Hyper, big.mark = ",")))
+      cat(sprintf('<div class="metric-card"><div class="value" style="color:#2980b9;">%s</div><div class="label">Hypo</div></div>\n',
+                  format(row$Hypo, big.mark = ",")))
+      cat('</div>\n\n')
+    }
+
+    cat("\n\n**Comparison table:**\n\n")
+    print(knitr::kable(summary_df, format = "html", row.names = FALSE,
+                 table.attr = 'class="table table-striped table-bordered"'))
+  }
+} else { cat("No diff results.\n") }
+```
+
+```{r threshold_curve, fig.height=5}
+if (!is.null(diff_results) && length(diff_results) > 0) {
+  curve <- do.call(rbind, lapply(names(diff_results), function(m) {
+    d <- tryCatch(methylKit::getData(diff_results[[m]]), error = function(e) NULL)
+    if (is.null(d)) return(NULL)
+    d <- d[!is.na(d$qvalue) & !is.na(d$meth.diff), ]
+    do.call(rbind, lapply(seq(0, 50, 2), function(c) {
+      data.frame(Scenario = m, Cutoff = c,
+                 DMCs = sum(d$qvalue < diff_qvalue_report & abs(d$meth.diff) >= c))
+    }))
+  }))
+  if (!is.null(curve) && nrow(curve) > 0) {
+    print(
+      ggplot(curve, aes(Cutoff, DMCs, colour = Scenario)) +
+        geom_line(linewidth = 1) + geom_point(size = 2) +
+        geom_vline(xintercept = diff_cutoff_report, linetype = "dashed", colour = "red") +
+        scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
+        labs(title = "DMC Count vs Threshold", x = "Min |Diff| (%)", y = "DMCs") +
+        theme_minimal(base_size = 12) + theme(legend.position = "bottom")
+    )
+  }
+}
+```
+
+## Volcano Plots {.tabset}
+
+```{r volcanos, results='asis', fig.height=6}
+if (!is.null(diff_results)) {
+  for (model in names(diff_results)) {
+    cat(sprintf("\n\n### %s\n\n", model))
+    fd <- tryCatch(methylKit::getData(diff_results[[model]]), error = function(e) NULL)
+    if (is.null(fd) || nrow(fd) == 0) { cat("No data.\n"); next }
+    fd <- fd[!is.na(fd$qvalue) & !is.na(fd$meth.diff), ]
+    if (nrow(fd) == 0) { cat("All NA.\n"); next }
+
+    minq <- min(fd$qvalue[fd$qvalue > 0], na.rm = TRUE)
+    if (is.infinite(minq)) minq <- 1e-300
+    fd$qvalue[fd$qvalue == 0] <- minq
+    fd$Status <- "NS"
+    sig <- fd$qvalue < diff_qvalue_report & abs(fd$meth.diff) >= diff_cutoff_report
+    fd$Status[sig & fd$meth.diff > 0] <- "Hyper"
+    fd$Status[sig & fd$meth.diff < 0] <- "Hypo"
+    fd$logQ <- -log10(fd$qvalue)
+
+    cat('<div class="metric-row">\n')
+    cat(sprintf('<div class="metric-card"><div class="value">%s</div><div class="label">Tested</div></div>\n', format(nrow(fd), big.mark = ",")))
+    cat(sprintf('<div class="metric-card"><div class="value" style="color:#c0392b;">%d</div><div class="label">Hyper</div></div>\n', sum(fd$Status == "Hyper")))
+    cat(sprintf('<div class="metric-card"><div class="value" style="color:#2980b9;">%d</div><div class="label">Hypo</div></div>\n', sum(fd$Status == "Hypo")))
+    cat('</div>\n\n')
+
+    ds <- fd[fd$Status != "NS", ]
+    dn <- fd[fd$Status == "NS", ]
+    if (nrow(dn) > 5000) dn <- dn[sample(nrow(dn), 5000), ]
+    viz <- rbind(ds, dn)
+    viz$Status <- factor(viz$Status, levels = c("Hyper", "Hypo", "NS"))
+
+    print(
+      ggplot(viz, aes(meth.diff, logQ, colour = Status)) +
+        geom_point(alpha = .5, size = .8) +
+        scale_colour_manual(values = c(Hyper = "#c0392b", Hypo = "#2980b9", NS = "grey70"), drop = FALSE) +
+        geom_vline(xintercept = c(-diff_cutoff_report, diff_cutoff_report), linetype = "dashed") +
+        geom_hline(yintercept = -log10(diff_qvalue_report), linetype = "dashed") +
+        labs(title = sprintf("%s - %d Hyper / %d Hypo", model, sum(fd$Status == "Hyper"), sum(fd$Status == "Hypo")),
+             x = "Diff (%)", y = "-log10(q)") +
+        theme_minimal(base_size = 12) + theme(legend.position = "bottom")
+    )
+    cat("\n\n")
+  }
+}
+```
+
+## DMC Distribution {.tabset}
+
+```{r dmc_dist, results='asis', fig.height=5}
+if (!is.null(diff_results)) {
+  for (model in names(diff_results)) {
+    cat(sprintf("\n\n### %s\n\n", model))
+    fd <- tryCatch(methylKit::getData(diff_results[[model]]), error = function(e) NULL)
+    if (is.null(fd)) { cat("No data.\n"); next }
+    fd <- fd[!is.na(fd$qvalue) & !is.na(fd$meth.diff), ]
+    sig <- fd$qvalue < diff_qvalue_report & abs(fd$meth.diff) >= diff_cutoff_report
+    if (sum(sig) == 0) { cat("No DMCs.\n"); next }
+    ds <- fd[sig, ]; ds$Dir <- ifelse(ds$meth.diff > 0, "Hyper", "Hypo")
+    ds$chr_f <- factor(gsub("chr", "", ds$chr), levels = c(as.character(1:22), "X", "Y", "M"))
+    cc <- as.data.frame(table(ds$chr_f, ds$Dir), stringsAsFactors = FALSE)
+    colnames(cc) <- c("Chr", "Dir", "N"); cc <- cc[cc$N > 0, ]
+    if (nrow(cc) > 0) {
+      print(
+        ggplot(cc, aes(Chr, N, fill = Dir)) + geom_col(position = "dodge", alpha = .85) +
+          scale_fill_manual(values = c(Hyper = "#c0392b", Hypo = "#2980b9")) +
+          labs(title = model, x = "Chr", y = "Count") +
+          theme_minimal(base_size = 11) + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+      )
+    }
+    print(
+      ggplot(ds, aes(meth.diff, fill = Dir)) + geom_histogram(bins = 50, alpha = .7) +
+        scale_fill_manual(values = c(Hyper = "#c0392b", Hypo = "#2980b9")) +
+        geom_vline(xintercept = c(-diff_cutoff_report, diff_cutoff_report), linetype = "dashed") +
+        labs(title = sprintf("Diff Distribution - %s", model), x = "Diff (%)", y = "Count") +
+        theme_minimal(base_size = 12)
+    )
+    cat("\n\n")
+  }
+}
+```
+
+---
+
+# Genomic Annotation {.tabset}
+
+```{r annotation, results='asis', fig.height=5}
+annot_dir <- file.path(res_dir, "Annotation")
+if (dir.exists(annot_dir) && has_readxl) {
+  afs <- list.files(annot_dir, "^Annotated_DMCs_.*\\.xlsx$", full.names = TRUE)
+  if (length(afs) > 0) {
+    for (af in afs) {
+      mn <- gsub("^Annotated_DMCs_|\\.xlsx$", "", basename(af))
+      cat(sprintf("\n\n## %s\n\n", mn))
+      da <- tryCatch(as.data.frame(readxl::read_excel(af)), error = function(e) NULL)
+      if (is.null(da) || nrow(da) == 0) { cat("No data.\n"); next }
+
+      ad <- if (!is.null(cfg$annot_diff_cutoff)) cfg$annot_diff_cutoff else 25
+      if (ad != diff_cutoff_report)
+        cat(sprintf('<div class="warn-box">Annotation used |diff| &ge; %d%% (pipeline: %d%%)</div>\n\n', ad, diff_cutoff_report))
+
+      # ── Count unique DMCs vs annotation rows ──
+      if (all(c("chr", "start") %in% colnames(da))) {
+        n_unique <- length(unique(paste0(da$chr, ":", da$start)))
+      } else {
+        n_unique <- nrow(da)
+      }
+
+      # ── Annotation count ──
+      cat('<div class="metric-row">\n')
+      cat(sprintf('<div class="metric-card"><div class="value">%s</div><div class="label">Annotations found</div></div>\n',
+                  format(nrow(da), big.mark = ",")))
+      cat(sprintf('<div class="metric-card"><div class="value">%d%%</div><div class="label">Diff cutoff</div></div>\n',
+                  ad))
+      cat('</div>\n\n')
+
+      if ("annot.type" %in% colnames(da)) {
+        da$Feature <- "Other"
+        da$Feature[grepl("promoter", da$annot.type, TRUE)] <- "Promoters"
+        da$Feature[grepl("exon", da$annot.type, TRUE)] <- "Exons"
+        da$Feature[grepl("intron", da$annot.type, TRUE)] <- "Introns"
+        da$Feature[grepl("intergenic", da$annot.type, TRUE)] <- "Intergenic"
+        da$Feature[grepl("UTR", da$annot.type, TRUE)] <- "UTRs"
+        da$Feature[grepl("CpG", da$annot.type, TRUE)] <- "CpG Islands"
+        fc <- as.data.frame(table(da$Feature), stringsAsFactors = FALSE)
+        colnames(fc) <- c("Feature", "Count")
+        fc$Pct <- round(100 * fc$Count / sum(fc$Count), 1)
+
+        print(
+          ggplot(fc, aes("", Count, fill = Feature)) + geom_col(width = 1, alpha = .85) +
+            coord_polar("y") + scale_fill_brewer(palette = "Set2") +
+            labs(title = sprintf("%s (%s annotations)", mn, format(nrow(da), big.mark = ","))) +
+            theme_void(base_size = 12)
+        )
+        cat("\n\n")
+        print(knitr::kable(fc[order(-fc$Count), ], format = "html", row.names = FALSE,
+                            table.attr = 'class="table table-striped"'))
+      }
+      cat("\n\n---\n\n")
+    }
+  } else { cat("No annotation files.\n") }
+} else { cat("Annotation dir not found.\n") }
+```
+
+---
+
+# Signature Validation {.tabset}
+
+```{r val_gate, results='asis'}
+if (!has_val) {
+  cat('<div class="info-box">No validation results found.</div>\n')
+}
+```
+
+```{r val_overview, eval=has_val, results='asis'}
+cat("## Overview\n\n")
+
+bench <- do.call(rbind, lapply(names(val_results), function(nm) {
+  r <- val_results[[nm]]
+  is_default <- grepl("^DMC_default_", nm)
+  perf <- NA
+  if (!is.null(r$svm_model))
+    perf <- round(max(r$svm_model$results[[r$metric_used]], na.rm = TRUE), 3)
+  data.frame(
+    Signature = nm, Source = if (is_default) "Auto" else "User",
+    CpGs = r$n_cpgs, Metric = if (!is.null(r$svm_model)) r$metric_used else "N/A",
+    Performance = perf,
+    Accuracy = if (!is.null(r$accuracy) && !is.na(r$accuracy)) sprintf("%.1f%%", r$accuracy * 100) else "N/A",
+    Silhouette = round(r$silhouette, 3), stringsAsFactors = FALSE)
+}))
+bench <- bench[order(-bench$Silhouette), ]
+
+cat('<div class="metric-row">\n')
+cat(sig_card(length(val_results), "Validated", "#2980b9"))
+cat(sig_card(sprintf("%.3f", max(bench$Silhouette)), "Best Sil.", "#27ae60"))
+cat(sig_card(sprintf("%d/%d", sum(!is.na(bench$Performance)), nrow(bench)), "SVM OK", "#e67e22"))
+cat('</div>\n\n')
+
+print(knitr::kable(bench, format = "html", row.names = FALSE,
+             table.attr = 'class="table table-striped table-bordered" style="font-size:13px;"'))
+```
+
+```{r val_details, eval=has_val, results='asis', fig.width=10, fig.height=7}
+for (sig_name in names(val_results)) {
+  res <- val_results[[sig_name]]
+  cat(sprintf("\n\n## %s {.tabset}\n\n", sig_name))
+
+  # ── Metrics ──
+  cat("### Metrics\n\n")
+  sil_col <- if (res$silhouette > 0.5) "#27ae60" else if (res$silhouette > 0.25) "#f39c12" else "#e74c3c"
+
+  cat('<div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;">\n')
+  cat(sig_card(res$n_cpgs, "CpGs", "#34495e"))
+  cat(sig_card(sprintf("%.3f", res$silhouette), "Silhouette", sil_col))
+  if (!is.null(res$accuracy) && !is.na(res$accuracy))
+    cat(sig_card(sprintf("%.1f%%", res$accuracy * 100), "Accuracy", "#8e44ad"))
+  if (!is.null(res$auc) && !is.na(res$auc))
+    cat(sig_card(sprintf("%.3f", res$auc), "AUC", "#e74c3c"))
+  if (!is.null(res$sensitivity) && !is.na(res$sensitivity))
+    cat(sig_card(sprintf("%.1f%%", res$sensitivity * 100), "Sensitivity", "#3498db"))
+  if (!is.null(res$specificity) && !is.na(res$specificity))
+    cat(sig_card(sprintf("%.1f%%", res$specificity * 100), "Specificity", "#27ae60"))
+  cat('</div>\n\n')
+
+  sil_v <- res$silhouette
+  interp <- if (sil_v > 0.7) list("Strong separation", "good-box")
+            else if (sil_v > 0.5) list("Reasonable structure", "info-box")
+            else if (sil_v > 0.25) list("Weak structure", "warn-box")
+            else list("No structure", "excluded-box")
+  cat(sprintf('<div class="%s"><strong>Silhouette = %.3f</strong> -- %s</div>\n\n',
+              interp[[2]], sil_v, interp[[1]]))
+
+  if (!is.null(res$confusion)) {
+    cat("**Confusion Matrix:**\n\n")
+    print(knitr::kable(as.data.frame.matrix(res$confusion), format = "html",
+                        table.attr = 'class="table table-bordered" style="width:auto;"'))
+    cat("\n\n")
+  }
+
+  # ── PCA ──
+  if (!is.null(res$pca)) {
+    cat("### PCA\n\n")
+    pca <- res$pca
+    pdf <- data.frame(PC1 = pca$x[,1], PC2 = pca$x[,2],
+                       Group = res$raw_data$Class, Sample = rownames(res$raw_data))
+    ve <- round(summary(pca)$importance[2, 1:2] * 100, 1)
+
+    p <- ggplot(pdf, aes(PC1, PC2, colour = Group)) +
+      geom_point(size = 3.5, alpha = .85) +
+      scale_colour_manual(values = c("CTL" = "#3498db", "Test" = "#e74c3c")) +
+      labs(title = sprintf("PCA - %s (%d CpGs)", sig_name, res$n_cpgs),
+           x = sprintf("PC1 (%.1f%%)", ve[1]), y = sprintf("PC2 (%.1f%%)", ve[2])) +
+      theme_minimal(base_size = 13) + theme(legend.position = "bottom")
+
+    grp_n <- table(pdf$Group)
+    if (any(grp_n >= 3))
+      p <- p + stat_ellipse(level = .95, linetype = "dashed", linewidth = .7,
+                             data = pdf[pdf$Group %in% names(grp_n[grp_n >= 3]), ])
+    print(p)
+    cat("\n\n")
+
+    # Scree
+    ve_all <- summary(pca)$importance[2, ] * 100
+    ns <- min(10, length(ve_all))
+    sdf <- data.frame(PC = seq_len(ns), V = ve_all[seq_len(ns)])
+    print(
+      ggplot(sdf, aes(PC, V)) + geom_col(fill = "#2980b9", alpha = .8) +
+        geom_line(colour = "#e74c3c", linewidth = 1) + geom_point(colour = "#e74c3c", size = 2) +
+        scale_x_continuous(breaks = sdf$PC) +
+        labs(title = "Scree Plot", x = "PC", y = "Variance (%)") + theme_minimal(base_size = 12)
+    )
+    cat("\n\n")
+  }
+
+  # ── Heatmap ──
+  if (!is.null(res$beta_matrix) && has_pheatmap) {
+    cat("### Heatmap\n\n")
+    bm <- res$beta_matrix
+    if (nrow(bm) > 150) {
+      rv <- apply(bm, 1, var, na.rm = TRUE)
+      bm <- bm[order(rv, decreasing = TRUE)[1:150], , drop = FALSE]
+    }
+    annot_c <- data.frame(Group = res$raw_data$Class, row.names = colnames(bm))
+    tryCatch({
+      hm <- pheatmap::pheatmap(bm, scale = "row",
+        show_rownames = nrow(bm) <= 60, show_colnames = ncol(bm) <= 30,
+        annotation_col = annot_c,
+        annotation_colors = list(Group = c("CTL" = "#3498db", "Test" = "#e74c3c")),
+        clustering_method = "ward.D2",
+        color = colorRampPalette(c("#2980b9", "#ecf0f1", "#c0392b"))(100),
+        border_color = NA, main = sprintf("%s - %d CpGs", sig_name, nrow(bm)),
+        silent = TRUE)
+      grid::grid.newpage()
+      grid::grid.draw(hm$gtable)
+    }, error = function(e) cat("Heatmap failed.\n"))
+    cat("\n\n")
+  }
+
+  # ── ROC ──
+  if (!is.null(res$svm_model) && res$metric_used == "ROC") {
+    cat("### ROC\n\n")
+    preds <- res$svm_model$pred
+    if (!is.null(preds)) {
+      if ("C" %in% colnames(preds) && !is.null(res$svm_model$bestTune$C))
+        preds <- preds[preds$C == res$svm_model$bestTune$C, ]
+      lvls <- levels(preds$obs)
+      if (length(lvls) >= 2 && lvls[1] %in% colnames(preds)) {
+        tryCatch({
+          roc_obj <- pROC::roc(preds$obs, preds[[lvls[1]]])
+          rdf <- data.frame(FPR = 1 - roc_obj$specificities, TPR = roc_obj$sensitivities)
+          auc_v <- as.numeric(pROC::auc(roc_obj))
+          print(
+            ggplot(rdf, aes(FPR, TPR)) + geom_line(colour = "#e74c3c", linewidth = 1.2) +
+              geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey60") +
+              annotate("text", x = .6, y = .3, size = 5, fontface = "bold",
+                       label = sprintf("AUC = %.3f", auc_v)) +
+              labs(title = sig_name, x = "1-Specificity", y = "Sensitivity") +
+              theme_minimal(base_size = 13)
+          )
+        }, error = function(e) cat("ROC failed.\n"))
+        cat("\n\n")
+      }
+    }
+  }
+
+  # ── Variable Importance ──
+  if (!is.null(res$svm_model)) {
+    cat("### Top Loci\n\n")
+    imp_obj <- tryCatch(caret::varImp(res$svm_model, scale = FALSE), error = function(e) NULL)
+    if (!is.null(imp_obj) && nrow(imp_obj$importance) > 0) {
+      imp <- imp_obj$importance
+      imp$Score <- if ("Overall" %in% colnames(imp)) imp$Overall else apply(imp, 1, max)
+      imp$Raw <- rownames(imp)
+      known <- names(res$genes_map)
+      imp$Locus <- vapply(imp$Raw, function(x) {
+        if (x %in% known) return(x)
+        x2 <- gsub("\\.", ":", x); x2 <- sub(":([0-9]+):([0-9]+)$", ":\\1-\\2", x2)
+        if (x2 %in% known) return(x2)
+        x3 <- gsub("^X", "", x); x3 <- gsub("\\.", ":", x3); x3 <- sub(":([0-9]+):([0-9]+)$", ":\\1-\\2", x3)
+        if (x3 %in% known) return(x3)
+        x
+      }, character(1))
+
+      top <- head(imp[order(-imp$Score), ], 20)
+      top$Locus <- factor(top$Locus, levels = rev(top$Locus))
+
+      print(
+        ggplot(top, aes(Locus, Score)) + geom_col(fill = "#c0392b", alpha = .8) +
+          coord_flip() + labs(title = "Top 20 Discriminative Loci", x = "", y = "Importance") +
+          theme_minimal(base_size = 11)
+      )
+      cat("\n\n")
+    }
+  }
+}
+```
+
+---
+
+# Exported Files
+
+```{r files}
+af <- list.files(res_dir, recursive = TRUE, full.names = FALSE)
+if (length(af) > 0) {
+  edf <- data.frame(File = af, Type = toupper(tools::file_ext(af)),
+    Size = vapply(file.path(res_dir, af), function(f) {
+      sz <- file.info(f)$size; if (is.na(sz)) "?"
+      else if (sz>1e9) sprintf("%.1f GB",sz/1e9) else if (sz>1e6) sprintf("%.1f MB",sz/1e6)
+      else if (sz>1e3) sprintf("%.1f KB",sz/1e3) else paste0(sz," B")
+    }, character(1)), stringsAsFactors = FALSE)
+  if (has_dt) DT::datatable(edf, options = list(pageLength = 25, scrollX = TRUE))
+  else knitr::kable(edf, format = "html", row.names = FALSE, table.attr = 'class="table table-striped"')
+}
+```
+
+---
+
+# Session Info
+
+```{r session}
+sessionInfo()
+```
