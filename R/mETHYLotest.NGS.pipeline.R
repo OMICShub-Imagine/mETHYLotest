@@ -186,7 +186,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
   # Load phenotype (already validated)
   Pheno <- as.data.frame(readxl::read_excel(cfg$pheno_file))
 
-  SampleIds       <- as.list(Pheno[[cfg$col_sampleID]])
+  SampleIds <- as.list(as.character(Pheno[[cfg$col_sampleID]]))
   SamplePaths     <- as.list(Pheno[[cfg$col_file_path]])
   SampleTreatment <- as.vector(
     as.numeric(as.character(Pheno[[cfg$col_treatment]])))
