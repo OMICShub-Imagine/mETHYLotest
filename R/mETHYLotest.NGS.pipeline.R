@@ -1045,7 +1045,74 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
 
       message("[mETHYLotest] Tiled regions: ", nrow(tiles))
 
-      # Differential methylation on tiles
+      # ── Pre-compute per-group methylation means on tiles ──
+      tiles_perc <- NULL
+      tiles_pos  <- NULL
+
+      tryCatch({
+        tiles_perc <- methylKit::percMethylation(tiles)
+        tiles_data <- methylKit::getData(tiles)
+        tiles_pos  <- paste0(tiles_data$chr, ":", tiles_data$start)
+        message("[mETHYLotest] Tiles methylation matrix: ",
+                nrow(tiles_perc), " regions x ", ncol(tiles_perc), " samples")
+      }, error = function(e) {
+        message("[mETHYLotest] Warning: could not compute tiles methylation matrix: ",
+                e$message)
+      })
+
+      # ── Helper: enrich DMR dataframe with group means and status ──
+      enrich_dmr_df <- function(df) {
+        if (is.null(df) || nrow(df) == 0) return(df)
+
+        # Status column
+        if ("meth.diff" %in% colnames(df)) {
+          df$Status <- ifelse(df$meth.diff > 0, "Hyper", "Hypo")
+        }
+
+        # Per-group means
+        if (!is.null(tiles_perc) && !is.null(tiles_pos) &&
+            all(c("chr", "start") %in% colnames(df))) {
+
+          df_pos    <- paste0(df$chr, ":", df$start)
+          match_idx <- match(df_pos, tiles_pos)
+
+          df$Mean_CTL  <- NA_real_
+          df$Mean_Test <- NA_real_
+          df$Delta     <- NA_real_
+
+          valid <- !is.na(match_idx)
+          if (any(valid) && length(ctrl_idx) > 0) {
+            df$Mean_CTL[valid] <- round(
+              rowMeans(tiles_perc[match_idx[valid], ctrl_idx, drop = FALSE],
+                       na.rm = TRUE), 2)
+          }
+          if (any(valid) && length(case_idx) > 0) {
+            df$Mean_Test[valid] <- round(
+              rowMeans(tiles_perc[match_idx[valid], case_idx, drop = FALSE],
+                       na.rm = TRUE), 2)
+          }
+          if (any(valid)) {
+            df$Delta[valid] <- round(df$Mean_Test[valid] - df$Mean_CTL[valid], 2)
+          }
+
+          # Reorder: put new columns after meth.diff
+          if ("meth.diff" %in% colnames(df)) {
+            diff_pos <- which(colnames(df) == "meth.diff")
+            new_cols <- c("Status", "Mean_CTL", "Mean_Test", "Delta")
+            new_cols <- intersect(new_cols, colnames(df))
+            other_cols <- setdiff(colnames(df), new_cols)
+            before <- other_cols[seq_len(diff_pos)]
+            after  <- if (diff_pos < length(other_cols))
+              other_cols[(diff_pos + 1):length(other_cols)]
+            else character(0)
+            df <- df[, c(before, new_cols, after)]
+          }
+        }
+
+        df
+      }
+
+      # ── Differential methylation on tiles ──
       tiles_results <- list()
 
       for (model in names(scenarios)) {
@@ -1081,9 +1148,15 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
                   ": ", nrow(dm_tiles), " regions, ",
                   n_sig, " DMRs")
 
+          safe <- gsub("[^A-Za-z0-9_.-]", "_", model)
+
           if (n_sig > 0L) {
             df_tiles <- methylKit::getData(sig_tiles)
-            safe <- gsub("[^A-Za-z0-9_.-]", "_", model)
+
+            # ── Enrich with group means and status ──
+            df_tiles <- enrich_dmr_df(df_tiles)
+
+            # Excel
             writexl::write_xlsx(
               df_tiles,
               file.path(tiles_dir, paste0("DMR_tiles_", safe, ".xlsx")))
@@ -1093,7 +1166,8 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
               chrom      = df_tiles$chr,
               chromStart = df_tiles$start - 1L,
               chromEnd   = df_tiles$end,
-              name       = paste0("DMR_", seq_len(nrow(df_tiles))),
+              name       = paste0("DMR_", seq_len(nrow(df_tiles)),
+                                  "_", df_tiles$Status),
               score      = pmin(round(abs(df_tiles$meth.diff) * 10),
                                 1000L),
               strand     = ".")
@@ -1102,7 +1176,29 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
               file.path(tiles_dir, paste0("DMR_tiles_", safe, ".bed")),
               quote = FALSE, sep = "\t",
               row.names = FALSE, col.names = FALSE)
+
+            message("[mETHYLotest]   Exported: ", safe,
+                    " (", nrow(df_tiles), " DMRs | ",
+                    sum(df_tiles$Status == "Hyper"), " Hyper / ",
+                    sum(df_tiles$Status == "Hypo"), " Hypo)")
+
+          } else {
+            message("[mETHYLotest]   No DMRs at diff>=", diff_cutoff,
+                    "% & q<", diff_qvalue, " for ", model)
           }
+
+          # Always export full results (all regions, no filter)
+          raw_tiles <- methylKit::getData(dm_tiles)
+          raw_tiles <- raw_tiles[!is.na(raw_tiles$qvalue) &
+                                   !is.na(raw_tiles$meth.diff), ]
+          raw_tiles <- enrich_dmr_df(raw_tiles)
+          tryCatch(
+            writexl::write_xlsx(
+              raw_tiles,
+              file.path(tiles_dir, paste0("Full_tiles_", safe, ".xlsx"))),
+            error = function(e) NULL)
+          message("[mETHYLotest]   Full results: Full_tiles_", safe, ".xlsx",
+                  " (", nrow(raw_tiles), " regions)")
 
         }, error = function(e)
           message("[mETHYLotest] Tiling ", model,
