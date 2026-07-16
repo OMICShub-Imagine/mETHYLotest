@@ -279,6 +279,8 @@ methRead()              Import (Bismark / modkit / f5c / pb-CpG-tools)
       |                  (Basic / Batch / Covariate / Full)
       |
   tileMethylCounts()     Tiling windows (optional, region-level DMRs)
+      |                  DMP-based confidence filtering
+      |                  (High / Medium / Low / Unsupported)
       |
   methSeg()              Segmentation (optional, UMR/LMR/PMD/HMR)
       |
@@ -340,6 +342,10 @@ My_Project/
     ├── QC*/                       Quality control plots
     ├── DMP/ or Differential_Analysis/
     ├── DMR/ or Tiling_Windows/
+    │   ├── DMR_tiles_{scenario}.xlsx      Supported DMRs (≥1 DMP)
+    │   ├── DMR_tiles_{scenario}all.xlsx  All DMRs with confidence
+    │   ├── DMR_tiles{scenario}.bed       Supported DMRs for genome browser
+    │   └── Full_tiles_{scenario}.xlsx     All tested regions
     ├── Episignatures/ or Signatures/
     ├── Validation/
     ├── DMP_Reports/ or Annotation/
@@ -357,8 +363,35 @@ My_Project/
 - **Smart loading** — skips import if cached `.rds` exists
 - **Confounding detection** before batch correction
 - **Multi-scenario analysis** (Basic / Batch / Covariate / Full)
+- **DMR confidence filtering** — cross-references DMRs with DMPs to assign confidence levels (High / Medium / Low / Unsupported), reducing false positives especially with low sample sizes
 - **Signature validation** with SVM, PCA, Silhouette
 - **Automated HTML reports** at every stage
+
+---
+
+## DMR Confidence Levels (NGS Module)
+
+When tiling windows are enabled, each DMR is cross-referenced with
+individual DMPs (same scenario, same thresholds) to assess reliability.
+
+| Confidence | Criteria | Interpretation |
+|---|---|---|
+| 🟢 **High** | ≥ 3 DMPs in region AND ≥ 25% difference | Strong signal confirmed by individual CpGs |
+| 🟡 **Medium** | ≥ 1 DMP AND ≥ 15% difference | Likely real, consider for validation |
+| 🟠 **Low** | ≥ 1 DMP | Weak but DMP-supported signal |
+| 🔴 **Unsupported** | No DMP overlap | Likely false positive — excluded from main export |
+
+**Why is this needed?**
+
+The tiling approach aggregates read counts across CpGs within each
+window, which increases statistical power but can inflate significance
+— especially with few biological replicates.
+DMRs without any individually significant CpG (DMP) lack independent
+confirmation and should be interpreted with caution.
+
+The main export (`DMR_tiles_*.xlsx`) contains only supported DMRs.
+The complete set including unsupported regions is available in
+`DMR_tiles_*_all.xlsx` for exploratory analysis.
 
 ---
 
