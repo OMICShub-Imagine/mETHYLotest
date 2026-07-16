@@ -1124,59 +1124,159 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
 
         safe <- gsub("[^A-Za-z0-9_.-]", "_", model)
 
+        # ════════════════════════════════════════════════════════
+        # Pre-build DMP GRanges for cross-referencing
+        # ════════════════════════════════════════════════════════
+        dmp_gr <- NULL
+        if (model %in% names(diff_results)) {
+          tryCatch({
+            dmp_obj <- methylKit::getMethylDiff(
+              diff_results[[model]],
+              difference = diff_cutoff,
+              qvalue     = diff_qvalue)
+            dmp_data <- methylKit::getData(dmp_obj)
+            if (nrow(dmp_data) > 0L) {
+              dmp_gr <- GenomicRanges::GRanges(
+                seqnames = dmp_data$chr,
+                ranges   = IRanges::IRanges(
+                  start = dmp_data$start,
+                  end   = dmp_data$end))
+              message("[mETHYLotest]   DMP reference: ",
+                      length(dmp_gr), " DMPs for cross-check")
+            }
+          }, error = function(e)
+            message("[mETHYLotest]   Could not build DMP reference: ",
+                    e$message))
+        }
+
+        # ════════════════════════════════════════════════════════
+        # Helper: annotate DMR df with DMP overlap + confidence
+        # ════════════════════════════════════════════════════════
+        annotate_dmr_confidence <- function(df) {
+          if (is.null(df) || nrow(df) == 0L) return(df)
+
+          df$n_DMP      <- 0L
+          df$Confidence <- "Unsupported"
+
+          if (!is.null(dmp_gr)) {
+            tryCatch({
+              dmr_gr <- GenomicRanges::GRanges(
+                seqnames = df$chr,
+                ranges   = IRanges::IRanges(
+                  start = df$start,
+                  end   = df$end))
+              df$n_DMP <- GenomicRanges::countOverlaps(dmr_gr, dmp_gr)
+            }, error = function(e)
+              message("[mETHYLotest]   Overlap computation failed: ",
+                      e$message))
+          }
+
+          df$Confidence <- ifelse(
+            df$n_DMP >= 3L & abs(df$meth.diff) >= 25, "High",
+            ifelse(
+              df$n_DMP >= 1L & abs(df$meth.diff) >= 15, "Medium",
+              ifelse(
+                df$n_DMP >= 1L, "Low",
+                "Unsupported")))
+
+          df
+        }
+
+        # ════════════════════════════════════════════════════════
+        # Export significant DMRs
+        # ════════════════════════════════════════════════════════
         if (n_sig > 0L) {
           df_tiles <- methylKit::getData(sig_tiles)
 
-          # ── Status Hyper/Hypo ──
-          df_tiles$Status <- ifelse(df_tiles$meth.diff > 0, "Hyper", "Hypo")
+          # Status Hyper/Hypo
+          df_tiles$Status <- ifelse(df_tiles$meth.diff > 0,
+                                    "Hyper", "Hypo")
 
-          # Excel
+          # DMP cross-reference + confidence
+          df_tiles <- annotate_dmr_confidence(df_tiles)
+
+          # Log confidence breakdown
+          conf_table <- table(df_tiles$Confidence)
+          message("[mETHYLotest]   DMR confidence: ",
+                  paste(names(conf_table), conf_table,
+                        sep = "=", collapse = " | "))
+          message("[mETHYLotest]   DMR with >=1 DMP: ",
+                  sum(df_tiles$n_DMP > 0L), "/", nrow(df_tiles),
+                  " (", round(100 * sum(df_tiles$n_DMP > 0L) /
+                                nrow(df_tiles), 1), "%)")
+
+          # Export ALL DMRs (with confidence)
           writexl::write_xlsx(
             df_tiles,
-            file.path(tiles_dir, paste0("DMR_tiles_", safe, ".xlsx")))
+            file.path(tiles_dir,
+                      paste0("DMR_tiles_", safe, "_all.xlsx")))
 
-          # BED
-          bed <- data.frame(
-            chrom      = df_tiles$chr,
-            chromStart = df_tiles$start - 1L,
-            chromEnd   = df_tiles$end,
-            name       = paste0("DMR_", seq_len(nrow(df_tiles)),
-                                "_", df_tiles$Status),
-            score      = pmin(round(abs(df_tiles$meth.diff) * 10),
-                              1000L),
-            strand     = ".")
-          write.table(
-            bed,
-            file.path(tiles_dir, paste0("DMR_tiles_", safe, ".bed")),
-            quote = FALSE, sep = "\t",
-            row.names = FALSE, col.names = FALSE)
+          # Export supported only (>= 1 DMP)
+          df_supported <- df_tiles[df_tiles$Confidence != "Unsupported", ]
 
-          message("[mETHYLotest]   Exported: ", safe,
-                  " (", nrow(df_tiles), " DMRs | ",
-                  sum(df_tiles$Status == "Hyper"), " Hyper / ",
-                  sum(df_tiles$Status == "Hypo"), " Hypo)")
+          if (nrow(df_supported) > 0L) {
+            writexl::write_xlsx(
+              df_supported,
+              file.path(tiles_dir,
+                        paste0("DMR_tiles_", safe, ".xlsx")))
+
+            # BED (supported only)
+            bed <- data.frame(
+              chrom      = df_supported$chr,
+              chromStart = df_supported$start - 1L,
+              chromEnd   = df_supported$end,
+              name       = paste0("DMR_", seq_len(nrow(df_supported)),
+                                  "_", df_supported$Status,
+                                  "_", df_supported$Confidence),
+              score      = pmin(round(abs(df_supported$meth.diff) * 10),
+                                1000L),
+              strand     = ".")
+            write.table(
+              bed,
+              file.path(tiles_dir,
+                        paste0("DMR_tiles_", safe, ".bed")),
+              quote = FALSE, sep = "\t",
+              row.names = FALSE, col.names = FALSE)
+
+            message("[mETHYLotest]   Exported: ", safe,
+                    " (", nrow(df_supported), " supported DMRs from ",
+                    nrow(df_tiles), " total | ",
+                    sum(df_supported$Status == "Hyper"), " Hyper / ",
+                    sum(df_supported$Status == "Hypo"), " Hypo)")
+          } else {
+            message("[mETHYLotest]   No supported DMRs ",
+                    "(all ", nrow(df_tiles), " lack DMP evidence)")
+          }
 
         } else {
           message("[mETHYLotest]   No DMRs at diff>=", diff_cutoff,
                   "% & q<", diff_qvalue, " for ", model)
         }
 
-        # ── Per-group means (computed LAZILY, only for export) ──
+        # ════════════════════════════════════════════════════════
+        # Per-group means (computed LAZILY, only for export)
+        # ════════════════════════════════════════════════════════
         raw_tiles <- methylKit::getData(dm_tiles)
         raw_tiles <- raw_tiles[!is.na(raw_tiles$qvalue) &
                                  !is.na(raw_tiles$meth.diff), ]
 
         if (nrow(raw_tiles) > 0L) {
-          raw_tiles$Status <- ifelse(raw_tiles$meth.diff > 0, "Hyper", "Hypo")
+          raw_tiles$Status <- ifelse(raw_tiles$meth.diff > 0,
+                                     "Hyper", "Hypo")
+
+          # DMP cross-reference on full results too
+          raw_tiles <- annotate_dmr_confidence(raw_tiles)
 
           # Compute group means only if manageable size
           if (nrow(raw_tiles) <= 500000L) {
             tryCatch({
               tiles_perc <- methylKit::percMethylation(tiles)
               tiles_data <- methylKit::getData(tiles)
-              tiles_pos  <- paste0(tiles_data$chr, ":", tiles_data$start)
+              tiles_pos  <- paste0(tiles_data$chr, ":",
+                                   tiles_data$start)
 
-              df_pos    <- paste0(raw_tiles$chr, ":", raw_tiles$start)
+              df_pos    <- paste0(raw_tiles$chr, ":",
+                                  raw_tiles$start)
               match_idx <- match(df_pos, tiles_pos)
               valid     <- !is.na(match_idx)
 
@@ -1187,41 +1287,50 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
               if (any(valid) && length(ctrl_idx) > 0)
                 raw_tiles$Mean_CTL[valid] <- round(
                   rowMeans(tiles_perc[match_idx[valid], ctrl_idx,
-                                      drop = FALSE], na.rm = TRUE), 2)
+                                      drop = FALSE],
+                           na.rm = TRUE), 2)
               if (any(valid) && length(case_idx) > 0)
                 raw_tiles$Mean_Test[valid] <- round(
                   rowMeans(tiles_perc[match_idx[valid], case_idx,
-                                      drop = FALSE], na.rm = TRUE), 2)
+                                      drop = FALSE],
+                           na.rm = TRUE), 2)
               if (any(valid))
                 raw_tiles$Delta[valid] <- round(
-                  raw_tiles$Mean_Test[valid] - raw_tiles$Mean_CTL[valid], 2)
+                  raw_tiles$Mean_Test[valid] -
+                    raw_tiles$Mean_CTL[valid], 2)
 
-              # Also enrich sig DMRs if they exist
-              if (n_sig > 0L) {
-                sig_pos   <- paste0(df_tiles$chr, ":", df_tiles$start)
+              # Also enrich sig supported DMRs if they exist
+              if (n_sig > 0L &&
+                  exists("df_supported") &&
+                  nrow(df_supported) > 0L) {
+
+                sig_pos   <- paste0(df_supported$chr, ":",
+                                    df_supported$start)
                 sig_match <- match(sig_pos, tiles_pos)
                 sig_valid <- !is.na(sig_match)
 
-                df_tiles$Mean_CTL  <- NA_real_
-                df_tiles$Mean_Test <- NA_real_
-                df_tiles$Delta     <- NA_real_
+                df_supported$Mean_CTL  <- NA_real_
+                df_supported$Mean_Test <- NA_real_
+                df_supported$Delta     <- NA_real_
 
                 if (any(sig_valid) && length(ctrl_idx) > 0)
-                  df_tiles$Mean_CTL[sig_valid] <- round(
-                    rowMeans(tiles_perc[sig_match[sig_valid], ctrl_idx,
-                                        drop = FALSE], na.rm = TRUE), 2)
+                  df_supported$Mean_CTL[sig_valid] <- round(
+                    rowMeans(tiles_perc[sig_match[sig_valid],
+                                        ctrl_idx, drop = FALSE],
+                             na.rm = TRUE), 2)
                 if (any(sig_valid) && length(case_idx) > 0)
-                  df_tiles$Mean_Test[sig_valid] <- round(
-                    rowMeans(tiles_perc[sig_match[sig_valid], case_idx,
-                                        drop = FALSE], na.rm = TRUE), 2)
+                  df_supported$Mean_Test[sig_valid] <- round(
+                    rowMeans(tiles_perc[sig_match[sig_valid],
+                                        case_idx, drop = FALSE],
+                             na.rm = TRUE), 2)
                 if (any(sig_valid))
-                  df_tiles$Delta[sig_valid] <- round(
-                    df_tiles$Mean_Test[sig_valid] -
-                      df_tiles$Mean_CTL[sig_valid], 2)
+                  df_supported$Delta[sig_valid] <- round(
+                    df_supported$Mean_Test[sig_valid] -
+                      df_supported$Mean_CTL[sig_valid], 2)
 
-                # Re-export enriched DMRs
+                # Re-export enriched supported DMRs
                 writexl::write_xlsx(
-                  df_tiles,
+                  df_supported,
                   file.path(tiles_dir,
                             paste0("DMR_tiles_", safe, ".xlsx")))
               }
@@ -1245,10 +1354,11 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
         tryCatch(
           writexl::write_xlsx(
             raw_tiles,
-            file.path(tiles_dir, paste0("Full_tiles_", safe, ".xlsx"))),
+            file.path(tiles_dir,
+                      paste0("Full_tiles_", safe, ".xlsx"))),
           error = function(e) NULL)
-        message("[mETHYLotest]   Full results: Full_tiles_", safe, ".xlsx",
-                " (", nrow(raw_tiles), " regions)")
+        message("[mETHYLotest]   Full results: Full_tiles_", safe,
+                ".xlsx (", nrow(raw_tiles), " regions)")
       }
 
       saveRDS(tiles_results,
