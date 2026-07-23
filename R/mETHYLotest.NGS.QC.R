@@ -147,8 +147,68 @@ mETHYLotest.NGS.QC <- function(methyl_obj,
     do.call(rbind, gm_list)
   }, error = function(e) NULL)
 
-  message("QC Analysis completed.")
+  # --- 6. Export JSON for future works ---
+  message("Exporting JSON files for future works...")
+  tryCatch({
+    qc_data <- list()
+    chromosomes_set <- character(0)
+    current_sample_ids <- methylKit::getSampleID(methyl_obj)
+    
+    for (i in seq_along(methyl_obj)) {
+      sid <- current_sample_ids[i]
+      data <- methylKit::getData(methyl_obj[[i]])
+      
+      if (nrow(data) == 0) next
+      
+      # Statistiques globales
+      total_c <- sum(as.numeric(data$numCs))
+      total_t <- sum(as.numeric(data$numTs))
+      total_cov <- total_c + total_t
+      global_meth_pct <- if (total_cov > 0) 100 * total_c / total_cov else 0
+      
+      # Histogramme de méthylation
+      meth_pct <- 100 * data$numCs / (data$numCs + data$numTs)
+      h_meth <- hist(meth_pct, breaks=seq(0, 100, by=10), plot=FALSE)
+      meth_hist <- data.frame(
+        bin = h_meth$mids,
+        count = h_meth$counts
+      )
+      
+      # Histogramme de couverture (log10)
+      cov_val <- data$numCs + data$numTs
+      h_cov <- hist(log10(cov_val + 1), breaks=20, plot=FALSE)
+      cov_hist <- data.frame(
+        bin = h_cov$mids,
+        count = h_cov$counts
+      )
+      
+      # % Methylation par chromosome
+      chr_meth <- aggregate(meth_pct, by=list(chr=data$chr), FUN=mean, na.rm=TRUE)
+      names(chr_meth) <- c("chr", "mean_meth")
+      chromosomes_set <- unique(c(chromosomes_set, as.character(chr_meth$chr)))
+      
+      qc_data[[sid]] <- list(
+        global_meth_pct = global_meth_pct,
+        total_positions = nrow(data),
+        total_reads = total_cov,
+        meth_hist = meth_hist,
+        cov_hist = cov_hist,
+        chr_meth = chr_meth
+      )
+    }
+    
+    json_out <- list(
+      samples = qc_data,
+      chromosomes = chromosomes_set
+    )
+    
+    json_file <- file.path(dir_qc, "qc_results.json")
+    jsonlite::write_json(json_out, json_file, pretty = TRUE, auto_unbox = TRUE)
+  }, error = function(e) {
+    warning("Failed to export JSON files: ", e$message)
+  })
 
+  message("QC Analysis completed.")
   return(list(
     df_meth        = df_meth,
     df_controls    = df_controls,

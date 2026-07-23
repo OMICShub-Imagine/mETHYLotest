@@ -1461,6 +1461,18 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
   writexl::write_xlsx(profile_df,
                       file.path(res_dir, "Pipeline_Performance.xlsx"))
 
+  # ========================================================================
+  # JSON EXPORTS FOR FUTURE WORKS
+  # ========================================================================
+  tryCatch({
+    # Capture warnings
+    warns <- names(warnings())
+    if (is.null(warns)) warns <- list()
+    jsonlite::write_json(warns, file.path(res_dir, "warnings.json"))
+  }, error = function(e) {
+    message("[mETHYLotest] Warning: Could not save warnings.json: ", e$message)
+  })
+
   message("[mETHYLotest] ============================================")
   message("[mETHYLotest] Pipeline complete!")
   message("[mETHYLotest] Project:  ", cfg$project_name)

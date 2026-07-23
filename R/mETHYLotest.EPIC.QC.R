@@ -315,6 +315,46 @@ mETHYLotest.EPIC.QC <- function(myLoad,
       warning("[mETHYLotest EPIC QC] HTML report failed: ", e$message))
   }
 
+  # ── 14.5 JSON Export for future works ───────────────────────────────────────────────
+  message("[mETHYLotest EPIC QC] Exporting JSON files for future works...")
+  tryCatch({
+    qc_raw_dir <- file.path(normalizePath(outputDir), "QC_Raw")
+    if (!dir.exists(qc_raw_dir)) dir.create(qc_raw_dir, recursive = TRUE)
+
+    # Export PCA coordinates
+    if (!is.null(qc_results$pca_prcomp)) {
+      pca_df <- as.data.frame(qc_results$pca_prcomp$x[, 1:2])
+      pca_df$Sample <- rownames(pca_df)
+      if (!is.null(myLoad$pd)) {
+        pd <- as.data.frame(myLoad$pd)
+        if ("Sample_Group" %in% colnames(pd)) {
+          pca_df$Group <- pd[pca_df$Sample, "Sample_Group"]
+        } else {
+          pca_df$Group <- "Unknown"
+        }
+      }
+      jsonlite::write_json(pca_df, file.path(qc_raw_dir, "pca_coords.json"))
+    }
+
+    # Export Beta Density
+    if (doBetaDensity) {
+      beta <- if (!is.null(beta_matrix)) beta_matrix else myLoad$beta
+      x_vals <- seq(0, 1, length.out = 100)
+      density_df <- data.frame(x = round(x_vals, 3))
+      
+      for (i in seq_len(ncol(beta))) {
+        sample_name <- colnames(beta)[i]
+        d <- density(beta[, i], na.rm = TRUE)
+        y_vals <- approx(d$x, d$y, xout = x_vals)$y
+        y_vals[is.na(y_vals)] <- 0
+        density_df[[sample_name]] <- round(y_vals, 3)
+      }
+      jsonlite::write_json(density_df, file.path(qc_raw_dir, "beta_density.json"))
+    }
+  }, error = function(e) {
+    warning("[mETHYLotest EPIC QC] Failed to export JSON files: ", e$message)
+  })
+
   # ── 15. Interactive UI ─────────────────────────────────────────────────────
   if (run_interactive_ui) {
     message("[mETHYLotest EPIC QC] Launching interactive QC UI...")

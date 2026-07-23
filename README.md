@@ -1,6 +1,6 @@
 # mETHYLotest
 
-[![R package](https://img.shields.io/badge/R%20package-1.0.0-blue)](https://github.com/OMICShub-Imagine/mETHYLotest)
+[![R package](https://img.shields.io/badge/R%20package-1.0.1-blue)](https://github.com/OMICShub-Imagine/mETHYLotest)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 **Unified interactive pipeline for DNA methylation analysis.**
