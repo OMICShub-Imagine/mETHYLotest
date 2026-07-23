@@ -665,6 +665,28 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
                                   method = cluster_method,
                                   plot = FALSE)
   saveRDS(hc, file.path(interim_dir, "clustering_hc_object.rds"))
+  
+  # PCA
+  png(file.path(fig_dir, "QC_PCA.png"), width=800, height=800, res=150)
+  methylKit::PCASamples(meth)
+  dev.off()
+  
+  pca_res <- methylKit::PCASamples(meth, obj.return=TRUE)
+  if (!is.null(pca_res) && !is.null(pca_res$x)) {
+    pca_coords <- data.frame(Sample_Name = rownames(pca_res$x), pca_res$x)
+    write.csv(pca_coords, file.path(fig_dir, "PCA_coords.csv"), row.names = FALSE)
+  }
+  
+  # Export to QC dir for web interface
+  tryCatch({
+    qc_dir <- file.path(res_dir, "QC")
+    if (!dir.exists(qc_dir)) dir.create(qc_dir, recursive=TRUE)
+    file.copy(file.path(fig_dir, "Sample_Correlation.png"), file.path(qc_dir, "Sample_Correlation.png"), overwrite=TRUE)
+    file.copy(file.path(fig_dir, "Sample_Clustering.png"), file.path(qc_dir, "Sample_Clustering.png"), overwrite=TRUE)
+    file.copy(file.path(fig_dir, "QC_PCA.png"), file.path(qc_dir, "QC_PCA.png"), overwrite=TRUE)
+    file.copy(file.path(fig_dir, "PCA_coords.csv"), file.path(qc_dir, "PCA_coords.csv"), overwrite=TRUE)
+    file.copy(file.path(interim_dir, "clustering_hc_object.rds"), file.path(qc_dir, "clustering_hc_object.rds"), overwrite=TRUE)
+  }, error = function(e) warning("Failed to copy QC files: ", e$message))
 
   .end_step()
 
@@ -998,6 +1020,38 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
       tryCatch(
         writexl::write_xlsx(raw_df, full_path),
         error = function(e) NULL)
+        
+      # Generate Volcano Plot
+      tryCatch({
+        if (all(c("meth.diff", "qvalue") %in% colnames(raw_df))) {
+          plot_df <- raw_df
+          plot_df$status <- "Unchanged"
+          plot_df$status[plot_df$meth.diff > 0 & plot_df$qvalue < diff_qvalue] <- "Hyper"
+          plot_df$status[plot_df$meth.diff < 0 & plot_df$qvalue < diff_qvalue] <- "Hypo"
+          # handle qvalue == 0
+          plot_df$qvalue[plot_df$qvalue == 0] <- 1e-300
+          plot_df$logQ <- -log10(plot_df$qvalue)
+          
+          p_volc <- ggplot2::ggplot(plot_df, ggplot2::aes(x = meth.diff, y = logQ, color = status)) +
+            ggplot2::geom_point(alpha = 0.6) +
+            ggplot2::scale_color_manual(values = c("Hyper" = "red", "Hypo" = "blue", "Unchanged" = "gray")) +
+            ggplot2::theme_minimal() +
+            ggplot2::labs(title = paste("Volcano Plot:", safe), x = "Diff Meth (%)", y = "-log10(Q-value)")
+          ggplot2::ggsave(file.path(results_dir, paste0("Volcano_", safe, ".png")), plot = p_volc, width = 8, height = 6)
+        }
+      }, error = function(e) warning("[mETHYLotest] Failed to generate Volcano plot: ", e$message))
+      
+      # Generate Distribution Plot
+      tryCatch({
+        if ("qvalue" %in% colnames(raw_df)) {
+          p_dist <- ggplot2::ggplot(raw_df, ggplot2::aes(x = qvalue)) +
+            ggplot2::geom_histogram(bins = 50, fill = "steelblue", color = "black") +
+            ggplot2::theme_minimal() +
+            ggplot2::labs(title = paste("Q-Value Distribution:", safe), x = "Q-Value", y = "Count")
+          ggplot2::ggsave(file.path(results_dir, paste0("Distribution_", safe, ".png")), plot = p_dist, width = 8, height = 6)
+        }
+      }, error = function(e) warning("[mETHYLotest] Failed to generate Distribution plot: ", e$message))
+
       message("[mETHYLotest]   Full results: Full_", safe, ".xlsx",
               " (", nrow(raw_df), " positions)")
     }

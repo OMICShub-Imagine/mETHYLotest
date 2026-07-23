@@ -851,6 +851,36 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
       write.csv(myDMP[[comp]],
                 file.path(dmp_dir, paste0("DMP_", safe, ".csv")),
                 row.names = TRUE)
+                
+      # Generate Volcano Plot
+      tryCatch({
+        df_volc <- myDMP[[comp]]
+        if (all(c("logFC", "adj.P.Val") %in% colnames(df_volc))) {
+          df_volc$status <- "Unchanged"
+          df_volc$status[df_volc$logFC > 0 & df_volc$adj.P.Val < 0.05] <- "Hyper"
+          df_volc$status[df_volc$logFC < 0 & df_volc$adj.P.Val < 0.05] <- "Hypo"
+          df_volc$logQ <- -log10(df_volc$adj.P.Val)
+          
+          p_volc <- ggplot2::ggplot(df_volc, ggplot2::aes(x = logFC, y = logQ, color = status)) +
+            ggplot2::geom_point(alpha = 0.6) +
+            ggplot2::scale_color_manual(values = c("Hyper" = "red", "Hypo" = "blue", "Unchanged" = "gray")) +
+            ggplot2::theme_minimal() +
+            ggplot2::labs(title = paste("Volcano Plot:", comp), x = "logFC", y = "-log10(adj.P.Val)")
+          ggplot2::ggsave(file.path(dmp_dir, paste0("Volcano_", safe, ".png")), plot = p_volc, width = 8, height = 6)
+        }
+      }, error = function(e) warning("[mETHYLotest] Failed to generate Volcano plot: ", e$message))
+      
+      # Generate Distribution Plot
+      tryCatch({
+        df_dist <- myDMP[[comp]]
+        if ("P.Value" %in% colnames(df_dist)) {
+          p_dist <- ggplot2::ggplot(df_dist, ggplot2::aes(x = P.Value)) +
+            ggplot2::geom_histogram(bins = 50, fill = "steelblue", color = "black") +
+            ggplot2::theme_minimal() +
+            ggplot2::labs(title = paste("P-Value Distribution:", comp), x = "P-Value", y = "Count")
+          ggplot2::ggsave(file.path(dmp_dir, paste0("Distribution_", safe, ".png")), plot = p_dist, width = 8, height = 6)
+        }
+      }, error = function(e) warning("[mETHYLotest] Failed to generate Distribution plot: ", e$message))
     }
     message("[mETHYLotest] DMP: ", length(myDMP), " comparison(s).")
 
