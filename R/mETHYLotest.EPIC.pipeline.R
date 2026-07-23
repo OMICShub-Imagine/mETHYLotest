@@ -331,12 +331,18 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
     if (isTRUE(cfg$save_raw_obj)) {
       if (!dir.exists(rds_dir)) dir.create(rds_dir, recursive = TRUE)
       saveRDS(myLoad, myLoad_rds)
-      message("[mETHYLotest] Saved: ", myLoad_rds)
+    message("[mETHYLotest] Saved: ", myLoad_rds)
     }
   }
 
   rownames(myLoad$pd) <- myLoad$pd[["Sample_Name"]]
+  
+  # Save the phenotype table to a CSV for the Web App to read
+  utils::write.csv(myLoad$pd, file.path(res_dir, "Samples_Phenotype.csv"), row.names = FALSE)
 
+  # Check if biological variable exists in Pheno
+  bio_var <- cfg$biological_variable
+  
   # --- Unified Technology Detection ---
   cfg$technology <- arraytype
   message("[mETHYLotest] Detected technology: ", cfg$technology)

@@ -185,6 +185,9 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
 
   # Load phenotype (already validated)
   Pheno <- as.data.frame(readxl::read_excel(cfg$pheno_file))
+  
+  # Save the phenotype table to a CSV for the Web App to read
+  utils::write.csv(Pheno, file.path(res_dir, "Samples_Phenotype.csv"), row.names = FALSE)
 
   SampleIds <- as.list(as.character(Pheno[[cfg$col_sampleID]]))
   SamplePaths     <- as.list(Pheno[[cfg$col_file_path]])
