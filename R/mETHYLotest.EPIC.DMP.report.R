@@ -79,7 +79,7 @@ mETHYLotest.EPIC.DMP.report <- function(dmp_results,
   # --- 3. WORK ---
   work_list <- list()
 
-  # Mode SIGNATURE (Prioritaire si dossier fourni)
+  # SIGNATURE Mode (Prioritized if directory provided)
   if (!is.null(signatures_folder)) {
     if(!dir.exists(signatures_folder)) stop("Provided 'signatures_folder' does not exist.")
 
@@ -120,7 +120,7 @@ mETHYLotest.EPIC.DMP.report <- function(dmp_results,
     }
   }
 
-  # --- 4. BOUCLE DE GÉNÉRATION ---
+  # --- 4. GENERATION LOOP ---
 
   for (report_name in names(work_list)) {
     task <- work_list[[report_name]]
@@ -181,7 +181,7 @@ mETHYLotest.EPIC.DMP.report <- function(dmp_results,
       top_n_windows = top_n_windows
     )
 
-    # Sauvegarde temporaire pour Rmarkdown
+    # Temporary save for Rmarkdown
     safe_name <- gsub("[^[:alnum:]_]", "_", report_name)
     temp_rds <- file.path(output_directory, paste0(".temp_", safe_name, ".rds"))
     saveRDS(report_data, temp_rds)

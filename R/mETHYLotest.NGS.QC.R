@@ -20,7 +20,7 @@ mETHYLotest.NGS.QC <- function(methyl_obj,
 
   message(paste("--- Starting QC Analysis in:", output_base_dir, "---"))
 
-  # --- 0. SÉCURITÉ : Vérification des données vides ---
+  # --- 0. SECURITY : Empty data check ---
   rows_count <- sapply(methyl_obj, nrow)
   empty_indices <- which(rows_count == 0)
   all_sample_ids <- methylKit::getSampleID(methyl_obj)
@@ -36,7 +36,7 @@ mETHYLotest.NGS.QC <- function(methyl_obj,
 
   message(paste("Proceeding QC with", length(methyl_obj), "valid samples..."))
 
-  # --- 1. Gestion des Dossiers ---
+  # --- 1. Folder Management ---
   dir_meth    <- file.path(output_base_dir, "Methylation_Stats")
   dir_cov     <- file.path(output_base_dir, "Coverage_Stats")
   dir_pos     <- file.path(output_base_dir, "PositionStats")
@@ -109,7 +109,29 @@ mETHYLotest.NGS.QC <- function(methyl_obj,
     if (!is.null(c_stats))     sheets_list[["Coverage_CT"]] <- c_stats
     if (!is.null(df_controls)) sheets_list[["Controls"]]    <- df_controls
 
-    # Ajout d'un onglet "Metadata" avec les paramètres utilisés
+    # Calculate methylation histogram
+    meth_hist_df <- data.frame()
+    for (i in seq_along(methyl_obj)) {
+      sid <- methylKit::getSampleID(methyl_obj)[[i]]
+      d <- methylKit::getData(methyl_obj[[i]])
+      if (nrow(d) > 0) {
+        meth_pct <- 100 * d$numCs / (d$numCs + d$numTs)
+        h <- hist(meth_pct, breaks=seq(0, 100, by=10), plot=FALSE)
+        labels <- c("0-10", "10-20", "20-30", "30-40", "40-50", "50-60", "60-70", "70-80", "80-90", "90-100")
+        tmp_df <- data.frame(
+          Sample = sid,
+          bin = labels,
+          count = h$counts,
+          stringsAsFactors = FALSE
+        )
+        meth_hist_df <- rbind(meth_hist_df, tmp_df)
+      }
+    }
+    if (nrow(meth_hist_df) > 0) {
+      sheets_list[["Meth_Histogram"]] <- meth_hist_df
+    }
+
+    # Add a "Metadata" sheet with used parameters
     meta_df <- data.frame(
       Parameter = c("Min Coverage Used", "Samples Count", "Date"),
       Value = c(current_min_cov, length(methyl_obj), as.character(Sys.time()))

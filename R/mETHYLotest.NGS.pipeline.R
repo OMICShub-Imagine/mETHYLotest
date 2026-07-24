@@ -186,7 +186,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
   # Load phenotype (already validated)
   Pheno <- as.data.frame(readxl::read_excel(cfg$pheno_file))
 
-  # Save the phenotype table to a CSV for the Web App to read
+  # Save the phenotype table to a CSV for downstream analysis
   utils::write.csv(Pheno, file.path(cfg$res_dir, "Samples_Phenotype.csv"), row.names = FALSE)
 
   SampleIds <- as.list(as.character(Pheno[[cfg$col_sampleID]]))
@@ -680,7 +680,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
     write.csv(pca_coords, file.path(fig_dir, "PCA_coords.csv"), row.names = FALSE)
   }
 
-  # Export to QC dir for web interface
+  # Export to QC dir for further reporting
   tryCatch({
     qc_dir <- file.path(res_dir, "QC")
     if (!dir.exists(qc_dir)) dir.create(qc_dir, recursive=TRUE)
@@ -980,6 +980,41 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
           file.path(results_dir, paste0("DMC_", safe, ".bed")),
           quote = FALSE, sep = "\t",
           row.names = FALSE, col.names = FALSE)
+
+        # Heatmap Top 50 DMCs
+        if (!is.null(perc_meth) && !is.null(meth_pos) && requireNamespace("ComplexHeatmap", quietly = TRUE)) {
+          tryCatch({
+            df_sorted <- df_res[order(abs(df_res$meth.diff), decreasing = TRUE), ]
+            top_df <- head(df_sorted, 50)
+            top_pos <- paste0(top_df$chr, ":", top_df$start)
+            match_idx <- match(top_pos, meth_pos)
+            valid_idx <- match_idx[!is.na(match_idx)]
+            
+            if (length(valid_idx) > 1) {
+              mat <- perc_meth[valid_idx, , drop = FALSE]
+              rownames(mat) <- top_pos[!is.na(match_idx)]
+              
+              sample_groups <- rep("CTL", ncol(mat))
+              sample_groups[case_idx] <- "Test"
+              
+              ha <- ComplexHeatmap::HeatmapAnnotation(Group = sample_groups,
+                                                      col = list(Group = c("CTL" = "blue", "Test" = "red")))
+              
+              png(file.path(results_dir, paste0("Heatmap_", safe, ".png")), width = 800, height = 800, res = 120)
+              ht <- ComplexHeatmap::Heatmap(mat, name = "Meth %",
+                                            top_annotation = ha,
+                                            show_row_names = FALSE,
+                                            show_column_names = TRUE,
+                                            row_title = "Top DMCs",
+                                            column_title = "Samples")
+              ComplexHeatmap::draw(ht)
+              dev.off()
+              message("[mETHYLotest]   Heatmap exported: Heatmap_", safe, ".png")
+            }
+          }, error = function(e) {
+            message("[mETHYLotest]   Warning: Could not generate Heatmap: ", e$message)
+          })
+        }
 
         message("[mETHYLotest]   Exported: ", safe,
                 " (", nrow(df_res), " DMCs | ",

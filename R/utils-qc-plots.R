@@ -1,18 +1,18 @@
-#' (Interne) Trace la PCA et le t-SNE (Version simplifiée 2D)
+#' (Internal) Plots PCA and t-SNE (Simplified 2D version)
 #'
 #' @description
-#' Fonction utilitaire interne. Ne calcule rien, met en forme les
-#' graphiques ggplot à partir des résultats pré-calculés.
+#' Internal utility function. Does not compute anything, formats
+#' ggplot graphics from pre-calculated results.
 #'
-#' @param pca_result L'objet `prcomp` pré-calculé.
-#' @param tsne_result Un data.frame pré-calculé contenant TSNE1 et TSNE2.
-#' @param beta Matrice Beta (uniquement pour les colnames).
-#' @param pd Data frame phénotypique.
-#' @param couleurs_origines Vecteur de couleurs pour 'Origin'.
-#' @param doPCA (Logique) Générer le graphique PCA ?
-#' @param doTSNE (Logique) Générer le graphique t-SNE ?
+#' @param pca_result The pre-calculated `prcomp` object.
+#' @param tsne_result A pre-calculated data.frame containing TSNE1 and TSNE2.
+#' @param beta Beta matrix (only for colnames).
+#' @param pd Phenotype data frame.
+#' @param couleurs_origines Vector of colors for 'Origin'.
+#' @param doPCA (Logical) Generate the PCA plot?
+#' @param doTSNE (Logical) Generate the t-SNE plot?
 #'
-#' @return Une liste contenant `pca_plot` (ggplot) et `tsne_plot` (ggplot).
+#' @return A list containing `pca_plot` (ggplot) and `tsne_plot` (ggplot).
 #'
 #' @noRd
 #' @importFrom ggplot2 ggplot aes geom_point scale_color_manual guides guide_legend
@@ -20,7 +20,7 @@
 #' @importFrom ggrepel geom_text_repel
 #'
 mf_run_pca_tsne <- function(pca_result,
-                            tsne_result = NULL, # <-- MODIFIÉ : Reçoit le résultat
+                            tsne_result = NULL, # <-- MODIFIED: Receives the result
                             beta,
                             pd,
                             couleurs_origines = NULL,
@@ -30,7 +30,7 @@ mf_run_pca_tsne <- function(pca_result,
   p_champ <- NULL
   myLoad_t_SNE <- NULL
 
-  # --- Préparation des données communes ---
+  # --- Common data preparation ---
   pd_data <- data.frame(
     Sample_Status = pd$Sample_Status,
     SampleName = colnames(beta),
@@ -39,7 +39,7 @@ mf_run_pca_tsne <- function(pca_result,
     Origin = pd$Origin
   )
 
-  # --- 1. Graphique PCA (Inchangé, c'était déjà correct) ---
+  # --- 1. PCA plot (Unchanged, was already correct) ---
   if (doPCA && !is.null(pca_result)) {
     pca_df <- cbind(
       as.data.frame(pca_result$x[, c("PC1", "PC2")]),
@@ -60,7 +60,7 @@ mf_run_pca_tsne <- function(pca_result,
       ) +
       facet_wrap(~ Plate) +
       theme_minimal() +
-      ggtitle("[Import/Filtering] PCA par Origine, Statut (et Plaque)") +
+      ggtitle("[Import/Filtering] PCA by Origin, Status (and Plate)") +
       labs(
         x = paste0("PC1 (", pc1_var, "%)"),
         y = paste0("PC2 (", pc2_var, "%)"),
@@ -75,16 +75,16 @@ mf_run_pca_tsne <- function(pca_result,
     }
   }
 
-  # --- 2. Graphique t-SNE (MODIFIÉ) ---
-  # La section de calcul Rtsne::Rtsne a été SUPPRIMÉE
+  # --- 2. t-SNE plot (MODIFIED) ---
+  # The Rtsne::Rtsne computation section has been REMOVED
 
-  if (doTSNE && !is.null(tsne_result)) { # Vérifie si on a reçu les données
+  if (doTSNE && !is.null(tsne_result)) { # Checks if data was received
 
-    message("Génération du graphique t-SNE à partir des données pré-calculées.")
+    message("Generating t-SNE plot from pre-calculated data.")
 
-    # Combine les résultats t-SNE reçus avec les métadonnées
+    # Combines received t-SNE results with metadata
     df_tsne_combined <- cbind(
-      tsne_result, # Utilise l'objet fourni en argument
+      tsne_result, # Uses object provided as argument
       pd_data
     )
 
@@ -100,7 +100,7 @@ mf_run_pca_tsne <- function(pca_result,
       ) +
       facet_wrap(~ Plate) +
       theme_minimal() +
-      ggtitle("[Import/Filtering] t-SNE par Origine, Statut (et Plaque)") +
+      ggtitle("[Import/Filtering] t-SNE by Origin, Status (and Plate)") +
       labs(
         x = "t-SNE 1", y = "t-SNE 2",
         color = "Sample Origin", shape = "Sample Status"
@@ -113,26 +113,26 @@ mf_run_pca_tsne <- function(pca_result,
     }
 
   } else if (doTSNE) {
-    message("AVERTISSEMENT: doTSNE=TRUE mais tsne_result était NULL. Graphique t-SNE sauté.")
+    message("WARNING: doTSNE=TRUE but tsne_result was NULL. t-SNE plot skipped.")
   }
 
-  # --- Retour ---
+  # --- Return ---
   return(list(
     pca_plot = p_champ,
     tsne_plot = myLoad_t_SNE
   ))
 }
 
-#' (Interne) Trace la heatmap de corrélation SVD
+#' (Internal) Plot the SVD correlation heatmap
 #'
 #' @description
-#' Utilise PCAtools pour générer la heatmap de corrélation à partir d'un
-#' objet PCA pré-calculé.
+#' Uses PCAtools to generate the correlation heatmap from a
+#' pre-calculated PCA object.
 #'
-#' @param p_obj L'objet `pca` PRÉ-CALCULÉ de PCAtools.
-#' @param pheno_columns Colonnes de `pd` à corréler.
+#' @param p_obj The PRE-CALCULATED `pca` object from PCAtools.
+#' @param pheno_columns Columns of `pd` to correlate.
 #'
-#' @return Un objet graphique `eigencorplot`.
+#' @return An `eigencorplot` graphic object.
 #'
 #' @noRd
 #' @importFrom PCAtools eigencorplot

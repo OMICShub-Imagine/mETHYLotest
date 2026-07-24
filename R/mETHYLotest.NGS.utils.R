@@ -351,7 +351,7 @@ mETHYLotest.NGS.get_position_counts_with_common <- function(methyl_obj,
         legend.position = "none"
       )
 
-    # Calcul de la largeur de l'image
+    # Calculate image width
     calc_width <- max(6, length(all_levels) * 0.7)
 
     full_path <- file.path(output_dir, file_name)

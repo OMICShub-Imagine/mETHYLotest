@@ -337,7 +337,7 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
 
   rownames(myLoad$pd) <- myLoad$pd[["Sample_Name"]]
   
-  # Save the phenotype table to a CSV for the Web App to read
+  # Save the phenotype table to a CSV for downstream analysis
   utils::write.csv(myLoad$pd, file.path(res_dir, "Samples_Phenotype.csv"), row.names = FALSE)
 
   # Check if biological variable exists in Pheno
@@ -1108,19 +1108,19 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
     myDMR <- do.call(ChAMP::champ.DMR, dmr_args)
 
     # ------------------------------------------------------------------------
-    # Sauvegarde des résultats DMR
+    # Save DMR results
     # ------------------------------------------------------------------------
     if (!is.null(myDMR)) {
       message("[mETHYLotest] DMR result structure: ", class(myDMR))
 
-      # --- 1. Sauvegarde brute (objet complet) ---
+      # --- 1. Raw save (complete object) ---
       if (isTRUE(cfg$save_raw_obj)) {
         rds_path <- file.path(rds_dir, "myDMR.rds")
         saveRDS(myDMR, rds_path)
         message("[mETHYLotest] Raw DMR object saved: ", rds_path)
       }
 
-      # --- 2. Dossier DMR Results ---
+      # --- 2. DMR Results directory ---
       if (!dir.exists(dmr_dir)) dir.create(dmr_dir, recursive = TRUE)
 
       # Convertit le résultat en DataFrame si c’est une liste imbriquée
@@ -1145,7 +1145,7 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
           })
         }
 
-        # Sauvegarde globale (liste complète)
+        # Global save (complete list)
         saveRDS(myDMR, file.path(dmr_dir, "DMR_All_Results.rds"))
 
       } else if (is.data.frame(myDMR)) {
