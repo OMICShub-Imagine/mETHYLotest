@@ -1300,6 +1300,50 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
                     nrow(df_tiles), " total | ",
                     sum(df_supported$Status == "Hyper"), " Hyper / ",
                     sum(df_supported$Status == "Hypo"), " Hypo)")
+                    
+            # Heatmap of top 50 DMRs
+            message("[mETHYLotest]   Generating Heatmap (Top 50 DMRs)...")
+            tryCatch({
+              sig_sorted <- df_tiles[order(df_tiles$qvalue), ]
+              top50 <- head(sig_sorted, 50)
+              
+              tiles_perc <- methylKit::percMethylation(tiles)
+              tiles_data <- methylKit::getData(tiles)
+              tiles_pos <- paste0(tiles_data$chr, ":", tiles_data$start, "-", tiles_data$end)
+              
+              top50_pos <- paste0(top50$chr, ":", top50$start, "-", top50$end)
+              idx_top <- match(top50_pos, tiles_pos)
+              idx_top <- idx_top[!is.na(idx_top)]
+              
+              if (length(idx_top) > 0) {
+                pm_top <- tiles_perc[idx_top, , drop=FALSE]
+                rownames(pm_top) <- top50_pos[1:length(idx_top)]
+                colnames(pm_top) <- keep_ids
+                
+                if (requireNamespace("pheatmap", quietly = TRUE)) {
+                  annot_col <- data.frame(
+                    Group = ifelse(seq_along(keep_ids) %in% case_idx, "Test", "Control"),
+                    row.names = keep_ids
+                  )
+                  
+                  pheatmap::pheatmap(
+                    pm_top,
+                    cluster_rows = TRUE,
+                    cluster_cols = TRUE,
+                    show_colnames = TRUE,
+                    annotation_col = annot_col,
+                    show_rownames = FALSE,
+                    main = sprintf("Top 50 DMRs Heatmap - %s", safe),
+                    filename = file.path(tiles_dir, sprintf("Heatmap_tiles_%s.png", safe)),
+                    width = 8, height = 6
+                  )
+                  write.csv(pm_top, file.path(tiles_dir, sprintf("Heatmap_tiles_data_%s.csv", safe)))
+                } else {
+                  message("[mETHYLotest]   pheatmap not installed.")
+                }
+              }
+            }, error=function(e) message("[mETHYLotest]   Heatmap generation failed: ", e$message))
+
           } else {
             message("[mETHYLotest]   No supported DMRs ",
                     "(all ", nrow(df_tiles), " lack DMP evidence)")
@@ -1502,8 +1546,25 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
                              diagnostic.plot = TRUE,
                              G = as.integer(seg_G))
           grDevices::dev.off()
-          message("[mETHYLotest] Segmentation plot saved.")
+          message("[mETHYLotest] Segmentation diagnostic plot saved.")
         }, error = function(e) NULL)
+        
+        # Genome Track plot with ggplot2
+        tryCatch({
+          if (requireNamespace("ggplot2", quietly = TRUE)) {
+            message("[mETHYLotest]   Generating Segmentation Track Plot (Genome Track)...")
+            p <- ggplot2::ggplot(seg_df, ggplot2::aes(xmin = start, xmax = end, ymin = 0, ymax = seg.mean, fill = seg.mean)) +
+              ggplot2::geom_rect() +
+              ggplot2::facet_wrap(~ seqnames, scales = "free_x") +
+              ggplot2::scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 50, limits=c(0, 100)) +
+              ggplot2::theme_minimal() +
+              ggplot2::labs(title = paste("Segmentation Track -", first_model), x = "Position", y = "Methylation Mean (%)", fill="Meth (%)") +
+              ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+            
+            ggplot2::ggsave(file.path(seg_dir, paste0("Segmentation_Track_", first_model, ".png")), plot = p, width = 12, height = 8, dpi = 300)
+            message("[mETHYLotest]   Segmentation Track saved.")
+          }
+        }, error = function(e) message("[mETHYLotest]   Segmentation Track plot failed: ", e$message))
       }
 
     }, error = function(e)
