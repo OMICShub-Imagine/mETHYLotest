@@ -185,9 +185,9 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
 
   # Load phenotype (already validated)
   Pheno <- as.data.frame(readxl::read_excel(cfg$pheno_file))
-  
+
   # Save the phenotype table to a CSV for the Web App to read
-  utils::write.csv(Pheno, file.path(res_dir, "Samples_Phenotype.csv"), row.names = FALSE)
+  utils::write.csv(Pheno, file.path(cfg$res_dir, "Samples_Phenotype.csv"), row.names = FALSE)
 
   SampleIds <- as.list(as.character(Pheno[[cfg$col_sampleID]]))
   SamplePaths     <- as.list(Pheno[[cfg$col_file_path]])
@@ -668,18 +668,18 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
                                   method = cluster_method,
                                   plot = FALSE)
   saveRDS(hc, file.path(interim_dir, "clustering_hc_object.rds"))
-  
+
   # PCA
   png(file.path(fig_dir, "QC_PCA.png"), width=800, height=800, res=150)
   methylKit::PCASamples(meth)
   dev.off()
-  
+
   pca_res <- methylKit::PCASamples(meth, obj.return=TRUE)
   if (!is.null(pca_res) && !is.null(pca_res$x)) {
     pca_coords <- data.frame(Sample_Name = rownames(pca_res$x), pca_res$x)
     write.csv(pca_coords, file.path(fig_dir, "PCA_coords.csv"), row.names = FALSE)
   }
-  
+
   # Export to QC dir for web interface
   tryCatch({
     qc_dir <- file.path(res_dir, "QC")
@@ -1023,7 +1023,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
       tryCatch(
         writexl::write_xlsx(raw_df, full_path),
         error = function(e) NULL)
-        
+
       # Generate Volcano Plot
       tryCatch({
         if (all(c("meth.diff", "qvalue") %in% colnames(raw_df))) {
@@ -1034,7 +1034,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
           # handle qvalue == 0
           plot_df$qvalue[plot_df$qvalue == 0] <- 1e-300
           plot_df$logQ <- -log10(plot_df$qvalue)
-          
+
           p_volc <- ggplot2::ggplot(plot_df, ggplot2::aes(x = meth.diff, y = logQ, color = status)) +
             ggplot2::geom_point(alpha = 0.6) +
             ggplot2::scale_color_manual(values = c("Hyper" = "red", "Hypo" = "blue", "Unchanged" = "gray")) +
@@ -1043,7 +1043,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
           ggplot2::ggsave(file.path(results_dir, paste0("Volcano_", safe, ".png")), plot = p_volc, width = 8, height = 6)
         }
       }, error = function(e) warning("[mETHYLotest] Failed to generate Volcano plot: ", e$message))
-      
+
       # Generate Distribution Plot
       tryCatch({
         if ("qvalue" %in% colnames(raw_df)) {
@@ -1300,32 +1300,32 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
                     nrow(df_tiles), " total | ",
                     sum(df_supported$Status == "Hyper"), " Hyper / ",
                     sum(df_supported$Status == "Hypo"), " Hypo)")
-                    
+
             # Heatmap of top 50 DMRs
             message("[mETHYLotest]   Generating Heatmap (Top 50 DMRs)...")
             tryCatch({
               sig_sorted <- df_tiles[order(df_tiles$qvalue), ]
               top50 <- head(sig_sorted, 50)
-              
+
               tiles_perc <- methylKit::percMethylation(tiles)
               tiles_data <- methylKit::getData(tiles)
               tiles_pos <- paste0(tiles_data$chr, ":", tiles_data$start, "-", tiles_data$end)
-              
+
               top50_pos <- paste0(top50$chr, ":", top50$start, "-", top50$end)
               idx_top <- match(top50_pos, tiles_pos)
               idx_top <- idx_top[!is.na(idx_top)]
-              
+
               if (length(idx_top) > 0) {
                 pm_top <- tiles_perc[idx_top, , drop=FALSE]
                 rownames(pm_top) <- top50_pos[1:length(idx_top)]
                 colnames(pm_top) <- keep_ids
-                
+
                 if (requireNamespace("pheatmap", quietly = TRUE)) {
                   annot_col <- data.frame(
                     Group = ifelse(seq_along(keep_ids) %in% case_idx, "Test", "Control"),
                     row.names = keep_ids
                   )
-                  
+
                   pheatmap::pheatmap(
                     pm_top,
                     cluster_rows = TRUE,
@@ -1548,7 +1548,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
           grDevices::dev.off()
           message("[mETHYLotest] Segmentation diagnostic plot saved.")
         }, error = function(e) NULL)
-        
+
         # Genome Track plot with ggplot2
         tryCatch({
           if (requireNamespace("ggplot2", quietly = TRUE)) {
@@ -1560,7 +1560,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
               ggplot2::theme_minimal() +
               ggplot2::labs(title = paste("Segmentation Track -", first_model), x = "Position", y = "Methylation Mean (%)", fill="Meth (%)") +
               ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
-            
+
             ggplot2::ggsave(file.path(seg_dir, paste0("Segmentation_Track_", first_model, ".png")), plot = p, width = 12, height = 8, dpi = 300)
             message("[mETHYLotest]   Segmentation Track saved.")
           }
