@@ -337,15 +337,15 @@ My_Project/
 ├── data/
 │   └── selected_samples.xlsx
 └── Results/
-    ├── project_config.R
+    ├── project_config.R           Contains project_type ("NGS"/"EPIC") & export settings
     ├── interim/                   R objects (.rds)
-    ├── QC*/                       Quality control plots
-    ├── DMP/ or Differential_Analysis/
+    ├── QC*/                       Quality control plots (.png + Recharts/web .json + .csv)
+    ├── DMP/ or Differential_Analysis/ (DMC/DMR results in .csv + plot .json data)
     ├── DMR/ or Tiling_Windows/
-    │   ├── DMR_tiles_{scenario}.xlsx      Supported DMRs (≥1 DMP)
-    │   ├── DMR_tiles_{scenario}all.xlsx  All DMRs with confidence
-    │   ├── DMR_tiles{scenario}.bed       Supported DMRs for genome browser
-    │   └── Full_tiles_{scenario}.xlsx     All tested regions
+    │   ├── DMR_tiles_{scenario}.csv       Supported DMRs (≥1 DMP)
+    │   ├── DMR_tiles_{scenario}_all.csv   All DMRs with confidence
+    │   ├── DMR_tiles_{scenario}.bed       Supported DMRs for genome browser
+    │   └── Full_tiles_{scenario}.csv      All tested regions
     ├── Episignatures/ or Signatures/
     ├── Validation/
     ├── DMP_Reports/ or Annotation/
@@ -354,11 +354,14 @@ My_Project/
     └── *.html                     Reports
 ```
 
+*Note: By default, tabular result outputs are generated in standard, lightweight `.csv` format along with dynamic graphical datasets in `.json` for web integration. Generation of Excel tables (`.xlsx`) can be enabled by setting `export_excel = TRUE` in `project_config.R`.*
+
 ---
 
 ## Key Features
 
-- **Automatic array detection** from `Sample_Plate`
+- **Automatic project & array identification** — sets `project_type` ("NGS" / "EPIC") and array version from metadata
+- **Universal CSV & Dynamic JSON Exports** — generates lightweight tabular CSVs and web-ready JSON visualization data alongside plots (Excel `.xlsx` optional via `export_excel = TRUE`)
 - **Mixed-array harmonization** (EPICv1 + EPICv2 + 450K)
 - **Smart loading** — skips import if cached `.rds` exists
 - **Confounding detection** before batch correction
@@ -389,9 +392,9 @@ window, which increases statistical power but can inflate significance
 DMRs without any individually significant CpG (DMP) lack independent
 confirmation and should be interpreted with caution.
 
-The main export (`DMR_tiles_*.xlsx`) contains only supported DMRs.
+The main export (`DMR_tiles_*.csv`) contains only supported DMRs.
 The complete set including unsupported regions is available in
-`DMR_tiles_*_all.xlsx` for exploratory analysis.
+`DMR_tiles_*_all.csv` for exploratory analysis (Excel `.xlsx` available when `export_excel = TRUE`).
 
 ---
 

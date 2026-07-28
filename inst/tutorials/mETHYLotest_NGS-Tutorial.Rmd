@@ -124,11 +124,11 @@ mETHYLotest.NGS.pipeline()
         |
    Correlation + Clustering     Sample quality assessment
         |
-   calculateDiffMeth()          Multi-scenario differential methylation
-        |                       (Basic, Batch, Covariate, Full Model)
-   Export DMCs                   Excel + BED
-        |
-   tileMethylCounts()           Tiling windows (optional, region-level)
+    calculateDiffMeth()          Multi-scenario differential methylation
+         |                       (Basic, Batch, Covariate, Full Model)
+    Export DMCs                   CSV (+ optional Excel) + BED + JSON
+         |
+    tileMethylCounts()           Tiling windows (optional, region-level)
         |
    methSeg()                    Genome segmentation (optional, HMM)
         |
@@ -377,14 +377,14 @@ After running the full pipeline, you will have:
 
 | Output | Location | Content |
 |---|---|---|
-| QC Report | `Results/Final_QC_Report.html` | Coverage stats, controls, global methylation |
+| QC Report & Data | `Results/Final_QC_Report.html` & `Results/QC/` | Coverage stats, global meth tables (CSV), web JSON (`qc_results.json`) |
 | QC Plots | `Results/QC/cov_1/` | Per-sample methylation and coverage histograms |
 | Correlation | `Results/Comparative_Analysis/figures/` | Sample correlation matrix |
 | Clustering | `Results/Comparative_Analysis/figures/` | Hierarchical clustering dendrogram |
-| DMC files | `Results/Differential_Analysis/` | Excel + BED per scenario |
+| DMC & DMR files | `Results/Differential_Analysis/` | CSV (+ optional Excel) + BED + Volcano/Heatmap JSON per scenario |
 | Signatures | `Results/Signatures/` | Top 500 DMCs per scenario |
 | Validation | `Results/Validation/` | HTML report with SVM, PCA, Silhouette |
-| Annotation | `Results/Annotation/` | Annotated DMCs (promoters, CpG islands, etc.) |
+| Annotation | `Results/Annotation/` | Annotated DMCs in CSV + summary JSON (`annotation_summary.json`) |
 | Final Report | `Results/Final_Report.html` | Complete summary of all analyses |
 
 ---
@@ -535,11 +535,14 @@ both treatment groups remain.
 
 ### Export Strategy
 
+By default, all tabular results are saved as lightweight `.csv` files along with accompanying `.json` graphical datasets for dynamic web visualization. Generation of Excel spreadsheets (`.xlsx`) is optional and controlled via `export_excel = TRUE` in `project_config.R`.
+
 | File | Content | When |
 |---|---|---|
-| `DMC_<Model>.xlsx/.bed` | Significant DMCs (with Mean_CTL, Mean_Test, Status) | If any pass |
-| `DMC_relaxed_<Model>.xlsx` | Q-value only | If strict finds nothing |
-| `Full_<Model>.xlsx` | All positions | Always |
+| `DMC_<Model>.csv/.bed` | Significant DMCs (with Mean_CTL, Mean_Test, Status) | If any pass |
+| `DMC_relaxed_<Model>.csv` | Q-value only | If strict finds nothing |
+| `Full_<Model>.csv` | All positions | Always |
+| `volcano_data_<Model>.json` | Data structure for dynamic interactive plots | Always |
 
 ### DiffMeth Explorer UI
 
@@ -630,18 +633,18 @@ My_Project/
 |       +-- validation_results.rds
 |
 +-- Results/
-    |-- project_config.R
+    |-- project_config.R           (contains project_type="NGS" & export settings)
     |-- Final_QC_Report.html
     |-- Final_Report.html
-    |-- QC/cov_1/, QC/cov_10/
+    |-- QC/ (csv tables & qc_results.json)
     |-- Comparative_Analysis/figures/
-    |-- Differential_Analysis/
+    |-- Differential_Analysis/ (csv tables & volcano/heatmap jsons)
     |-- Tiling_Windows/
     |-- Segmentation/
     |-- Signatures/
     |-- Validation/
     |-- DiffMeth_Figures/
-    +-- Annotation/
+    +-- Annotation/ (csv tables & annotation_summary.json)
 ```
 
 ---
@@ -649,6 +652,10 @@ My_Project/
 # Configuration Reference
 
 ```{r config-ref}
+# General & Export Parameters
+cfg$project_type      # "NGS"
+cfg$export_excel      # FALSE (generates standard CSV and dynamic JSON by default)
+
 # Paths
 cfg$project_name; cfg$project_dir; cfg$res_dir
 cfg$rds_dir; cfg$pheno_file

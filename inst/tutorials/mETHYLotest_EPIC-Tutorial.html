@@ -2320,7 +2320,7 @@ Produces</h2>
 <tr class="odd">
 <td>Pre-QC plots</td>
 <td><code>Results/QC_Raw/</code></td>
-<td>Raw beta distributions, density plots</td>
+<td>Raw beta distributions, density plots, and Recharts JSONs</td>
 </tr>
 <tr class="even">
 <td>Post-norm QC</td>
@@ -2330,7 +2330,8 @@ Produces</h2>
 <tr class="odd">
 <td>DMP results</td>
 <td><code>Results/DMP/</code></td>
-<td>CSV per comparison</td>
+<td>CSV (+ optional Excel) + Volcano/Distribution web JSON per
+comparison</td>
 </tr>
 <tr class="even">
 <td>Signatures</td>
@@ -2354,8 +2355,9 @@ Produces</h2>
 </tr>
 <tr class="even">
 <td>Performance</td>
-<td><code>Results/Pipeline_Performance.xlsx</code></td>
-<td>Per-step timing and RAM</td>
+<td><code>Results/Pipeline_Performance.csv</code></td>
+<td>Per-step timing and RAM (optional Excel <code>.xlsx</code> via
+<code>export_excel = TRUE</code>)</td>
 </tr>
 </tbody>
 </table>
@@ -2779,7 +2781,7 @@ all analyses performed.</p>
 Report</h2>
 <p>Generated after signature validation with per-signature
 benchmarks.</p>
-<p><a href="https://htmlpreview.github.io/?https://github.com/OMICShub-Imagine/mETHYLotest/blob/main/inst/tutorials/EPIC_DEMO_Validation_Report.html" target="_blank">View example EPIC Report</a></p>
+<p><a href="https://htmlpreview.github.io/?https://github.com/OMICShub-Imagine/mETHYLotest/blob/main/inst/tutorials/EPIC_DEMO_Validation_Report.html" target="_blank">View example EPIC Validation Report</a></p>
 <hr />
 </div>
 </div>
@@ -2790,8 +2792,8 @@ benchmarks.</p>
 │   └── selected_samples.xlsx
 │
 └── Results/
-    ├── project_config.R
-    ├── Pipeline_Performance.xlsx
+    ├── project_config.R           (contains project_type=&quot;EPIC&quot; &amp; export settings)
+    ├── Pipeline_Performance.csv
     ├── interim/
     │   ├── myLoad.rds
     │   ├── myNorm.rds
@@ -2799,11 +2801,11 @@ benchmarks.</p>
     │   ├── validation_results.rds
     │   └── pipeline_results.rds
     │
-    ├── QC_Raw/
+    ├── QC_Raw/ (plots &amp; Recharts dynamic web JSONs)
     ├── QC_Normalised/
     ├── QC_Combat/
     ├── CellType/
-    ├── DMP/
+    ├── DMP/ (CSV result tables &amp; volcano/distribution JSONs)
     ├── Episignatures/
     ├── DMP_Reports/
     ├── Validation/
@@ -2816,37 +2818,41 @@ benchmarks.</p>
 <div id="configuration-reference" class="section level1" number="11">
 <h1><span class="header-section-number">11</span> Configuration
 Reference</h1>
-<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a><span class="co"># Paths</span></span>
-<span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a>cfg<span class="sc">$</span>project_dir; cfg<span class="sc">$</span>res_dir; cfg<span class="sc">$</span>rds_dir</span>
-<span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a>cfg<span class="sc">$</span>pheno_file; cfg<span class="sc">$</span>idat_dir</span>
-<span id="cb15-4"><a href="#cb15-4" tabindex="-1"></a>cfg<span class="sc">$</span>technology      <span class="co"># Auto-detected: &quot;450K&quot;, &quot;EPICv1&quot;, &quot;EPICv2&quot;</span></span>
-<span id="cb15-5"><a href="#cb15-5" tabindex="-1"></a></span>
-<span id="cb15-6"><a href="#cb15-6" tabindex="-1"></a><span class="co"># QC Filters</span></span>
-<span id="cb15-7"><a href="#cb15-7" tabindex="-1"></a>cfg<span class="sc">$</span>filter_det_p    <span class="co"># TRUE</span></span>
-<span id="cb15-8"><a href="#cb15-8" tabindex="-1"></a>cfg<span class="sc">$</span>det_p_cut       <span class="co"># 0.01</span></span>
-<span id="cb15-9"><a href="#cb15-9" tabindex="-1"></a>cfg<span class="sc">$</span>filter_beads    <span class="co"># TRUE</span></span>
-<span id="cb15-10"><a href="#cb15-10" tabindex="-1"></a>cfg<span class="sc">$</span>filter_snps     <span class="co"># TRUE</span></span>
-<span id="cb15-11"><a href="#cb15-11" tabindex="-1"></a>cfg<span class="sc">$</span>filter_xy       <span class="co"># FALSE</span></span>
-<span id="cb15-12"><a href="#cb15-12" tabindex="-1"></a></span>
-<span id="cb15-13"><a href="#cb15-13" tabindex="-1"></a><span class="co"># Processing</span></span>
-<span id="cb15-14"><a href="#cb15-14" tabindex="-1"></a>cfg<span class="sc">$</span>do_impute       <span class="co"># TRUE/FALSE</span></span>
-<span id="cb15-15"><a href="#cb15-15" tabindex="-1"></a>cfg<span class="sc">$</span>norm_method     <span class="co"># &quot;BMIQ&quot;</span></span>
-<span id="cb15-16"><a href="#cb15-16" tabindex="-1"></a>cfg<span class="sc">$</span>do_refbase      <span class="co"># TRUE/FALSE (blood only)</span></span>
-<span id="cb15-17"><a href="#cb15-17" tabindex="-1"></a>cfg<span class="sc">$</span>perform_batch_correction  <span class="co"># TRUE/FALSE</span></span>
-<span id="cb15-18"><a href="#cb15-18" tabindex="-1"></a>cfg<span class="sc">$</span>batch_cols      <span class="co"># c(&quot;Sentrix_ID&quot;)</span></span>
-<span id="cb15-19"><a href="#cb15-19" tabindex="-1"></a></span>
-<span id="cb15-20"><a href="#cb15-20" tabindex="-1"></a><span class="co"># Analysis</span></span>
-<span id="cb15-21"><a href="#cb15-21" tabindex="-1"></a>cfg<span class="sc">$</span>analysis_pheno  <span class="co"># &quot;Sample_Group&quot;</span></span>
-<span id="cb15-22"><a href="#cb15-22" tabindex="-1"></a>cfg<span class="sc">$</span>compare_group   <span class="co"># NULL or c(&quot;CTL&quot;, &quot;CASE&quot;)</span></span>
-<span id="cb15-23"><a href="#cb15-23" tabindex="-1"></a>cfg<span class="sc">$</span>do_dmp          <span class="co"># TRUE</span></span>
-<span id="cb15-24"><a href="#cb15-24" tabindex="-1"></a>cfg<span class="sc">$</span>do_dmr          <span class="co"># FALSE</span></span>
-<span id="cb15-25"><a href="#cb15-25" tabindex="-1"></a>cfg<span class="sc">$</span>do_block        <span class="co"># FALSE</span></span>
-<span id="cb15-26"><a href="#cb15-26" tabindex="-1"></a>cfg<span class="sc">$</span>do_gsea         <span class="co"># FALSE</span></span>
-<span id="cb15-27"><a href="#cb15-27" tabindex="-1"></a>cfg<span class="sc">$</span>do_cna          <span class="co"># FALSE</span></span>
-<span id="cb15-28"><a href="#cb15-28" tabindex="-1"></a></span>
-<span id="cb15-29"><a href="#cb15-29" tabindex="-1"></a><span class="co"># System</span></span>
-<span id="cb15-30"><a href="#cb15-30" tabindex="-1"></a>cfg<span class="sc">$</span>num_cores       <span class="co"># 4</span></span>
-<span id="cb15-31"><a href="#cb15-31" tabindex="-1"></a>cfg<span class="sc">$</span>save_raw_obj    <span class="co"># TRUE</span></span></code></pre></div>
+<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a><span class="co"># General &amp; Export Parameters</span></span>
+<span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a>cfg<span class="sc">$</span>project_type    <span class="co"># &quot;EPIC&quot;</span></span>
+<span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a>cfg<span class="sc">$</span>export_excel    <span class="co"># FALSE (generates standard CSV and dynamic JSON by default)</span></span>
+<span id="cb15-4"><a href="#cb15-4" tabindex="-1"></a></span>
+<span id="cb15-5"><a href="#cb15-5" tabindex="-1"></a><span class="co"># Paths</span></span>
+<span id="cb15-6"><a href="#cb15-6" tabindex="-1"></a>cfg<span class="sc">$</span>project_dir; cfg<span class="sc">$</span>res_dir; cfg<span class="sc">$</span>rds_dir</span>
+<span id="cb15-7"><a href="#cb15-7" tabindex="-1"></a>cfg<span class="sc">$</span>pheno_file; cfg<span class="sc">$</span>idat_dir</span>
+<span id="cb15-8"><a href="#cb15-8" tabindex="-1"></a>cfg<span class="sc">$</span>technology      <span class="co"># Auto-detected: &quot;450K&quot;, &quot;EPICv1&quot;, &quot;EPICv2&quot;</span></span>
+<span id="cb15-9"><a href="#cb15-9" tabindex="-1"></a></span>
+<span id="cb15-10"><a href="#cb15-10" tabindex="-1"></a><span class="co"># QC Filters</span></span>
+<span id="cb15-11"><a href="#cb15-11" tabindex="-1"></a>cfg<span class="sc">$</span>filter_det_p    <span class="co"># TRUE</span></span>
+<span id="cb15-12"><a href="#cb15-12" tabindex="-1"></a>cfg<span class="sc">$</span>det_p_cut       <span class="co"># 0.01</span></span>
+<span id="cb15-13"><a href="#cb15-13" tabindex="-1"></a>cfg<span class="sc">$</span>filter_beads    <span class="co"># TRUE</span></span>
+<span id="cb15-14"><a href="#cb15-14" tabindex="-1"></a>cfg<span class="sc">$</span>filter_snps     <span class="co"># TRUE</span></span>
+<span id="cb15-15"><a href="#cb15-15" tabindex="-1"></a>cfg<span class="sc">$</span>filter_xy       <span class="co"># FALSE</span></span>
+<span id="cb15-16"><a href="#cb15-16" tabindex="-1"></a></span>
+<span id="cb15-17"><a href="#cb15-17" tabindex="-1"></a><span class="co"># Processing</span></span>
+<span id="cb15-18"><a href="#cb15-18" tabindex="-1"></a>cfg<span class="sc">$</span>do_impute       <span class="co"># TRUE/FALSE</span></span>
+<span id="cb15-19"><a href="#cb15-19" tabindex="-1"></a>cfg<span class="sc">$</span>norm_method     <span class="co"># &quot;BMIQ&quot;</span></span>
+<span id="cb15-20"><a href="#cb15-20" tabindex="-1"></a>cfg<span class="sc">$</span>do_refbase      <span class="co"># TRUE/FALSE (blood only)</span></span>
+<span id="cb15-21"><a href="#cb15-21" tabindex="-1"></a>cfg<span class="sc">$</span>perform_batch_correction  <span class="co"># TRUE/FALSE</span></span>
+<span id="cb15-22"><a href="#cb15-22" tabindex="-1"></a>cfg<span class="sc">$</span>batch_cols      <span class="co"># c(&quot;Sentrix_ID&quot;)</span></span>
+<span id="cb15-23"><a href="#cb15-23" tabindex="-1"></a></span>
+<span id="cb15-24"><a href="#cb15-24" tabindex="-1"></a><span class="co"># Analysis</span></span>
+<span id="cb15-25"><a href="#cb15-25" tabindex="-1"></a>cfg<span class="sc">$</span>analysis_pheno  <span class="co"># &quot;Sample_Group&quot;</span></span>
+<span id="cb15-26"><a href="#cb15-26" tabindex="-1"></a>cfg<span class="sc">$</span>compare_group   <span class="co"># NULL or c(&quot;CTL&quot;, &quot;CASE&quot;)</span></span>
+<span id="cb15-27"><a href="#cb15-27" tabindex="-1"></a>cfg<span class="sc">$</span>do_dmp          <span class="co"># TRUE</span></span>
+<span id="cb15-28"><a href="#cb15-28" tabindex="-1"></a>cfg<span class="sc">$</span>do_dmr          <span class="co"># FALSE</span></span>
+<span id="cb15-29"><a href="#cb15-29" tabindex="-1"></a>cfg<span class="sc">$</span>do_block        <span class="co"># FALSE</span></span>
+<span id="cb15-30"><a href="#cb15-30" tabindex="-1"></a>cfg<span class="sc">$</span>do_gsea         <span class="co"># FALSE</span></span>
+<span id="cb15-31"><a href="#cb15-31" tabindex="-1"></a>cfg<span class="sc">$</span>do_cna          <span class="co"># FALSE</span></span>
+<span id="cb15-32"><a href="#cb15-32" tabindex="-1"></a></span>
+<span id="cb15-33"><a href="#cb15-33" tabindex="-1"></a><span class="co"># System</span></span>
+<span id="cb15-34"><a href="#cb15-34" tabindex="-1"></a>cfg<span class="sc">$</span>num_cores       <span class="co"># 4</span></span>
+<span id="cb15-35"><a href="#cb15-35" tabindex="-1"></a>cfg<span class="sc">$</span>save_raw_obj    <span class="co"># TRUE</span></span></code></pre></div>
 <hr />
 </div>
 <div id="supported-array-types" class="section level1" number="12">
@@ -3038,7 +3044,7 @@ require molecular confirmation.</p>
 ## 
 ##   Doldi N (2026). _mETHYLotest: mETHYLotest: a unified toolkit for
 ##   reproducible multi-platform DNA methylation analysis_. R package
-##   version 0.1.0, &lt;https://github.com/OMICShub-Imagine/mETHYLotest&gt;.
+##   version 1.0.1, &lt;https://github.com/OMICShub-Imagine/mETHYLotest&gt;.
 ## 
 ## A BibTeX entry for LaTeX users is
 ## 
@@ -3046,7 +3052,7 @@ require molecular confirmation.</p>
 ##     title = {mETHYLotest: mETHYLotest: a unified toolkit for reproducible multi-platform DNA methylation analysis},
 ##     author = {Nicolas Doldi},
 ##     year = {2026},
-##     note = {R package version 0.1.0},
+##     note = {R package version 1.0.1},
 ##     url = {https://github.com/OMICShub-Imagine/mETHYLotest},
 ##   }</code></pre>
 <hr />
@@ -3054,29 +3060,28 @@ require molecular confirmation.</p>
 <div id="session-info" class="section level1" number="16">
 <h1><span class="header-section-number">16</span> Session Info</h1>
 <pre><code>## R version 4.5.3 (2026-03-11)
-## Platform: x86_64-pc-linux-gnu
-## Running under: Debian GNU/Linux 13 (trixie)
+## Platform: aarch64-apple-darwin20
+## Running under: macOS Tahoe 26.5.2
 ## 
 ## Matrix products: default
-## BLAS:   /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.11.0 
-## LAPACK: /usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.11.0  LAPACK version 3.11.0
+## BLAS:   /Library/Frameworks/R.framework/Versions/4.5-arm64/Resources/lib/libRblas.0.dylib 
+## LAPACK: /Library/Frameworks/R.framework/Versions/4.5-arm64/Resources/lib/libRlapack.dylib;  LAPACK version 3.12.1
 ## 
 ## locale:
-## [1] C
+## [1] C.UTF-8/C.UTF-8/C.UTF-8/C/C.UTF-8/C.UTF-8
 ## 
-## time zone: Etc/UTC
-## tzcode source: system (glibc)
+## time zone: Europe/Paris
+## tzcode source: internal
 ## 
 ## attached base packages:
 ## [1] stats     graphics  grDevices utils     datasets  methods   base     
 ## 
 ## loaded via a namespace (and not attached):
-##  [1] digest_0.6.39     R6_2.6.1          fastmap_1.2.0     xfun_0.57        
-##  [5] cachem_1.1.0      knitr_1.51        htmltools_0.5.9   rmarkdown_2.31   
-##  [9] lifecycle_1.0.5   cli_3.6.5         sass_0.4.10       jquerylib_0.1.4  
-## [13] compiler_4.5.3    rstudioapi_0.18.0 tools_4.5.3       evaluate_1.0.5   
-## [17] bslib_0.10.0      yaml_2.3.12       otel_0.2.0        jsonlite_2.0.0   
-## [21] rlang_1.1.7</code></pre>
+##  [1] digest_0.6.39   R6_2.6.1        fastmap_1.2.0   xfun_0.60      
+##  [5] cachem_1.1.0    knitr_1.51      htmltools_0.5.9 rmarkdown_2.31 
+##  [9] lifecycle_1.0.5 cli_3.6.6       sass_0.4.10     jquerylib_0.1.4
+## [13] compiler_4.5.3  tools_4.5.3     evaluate_1.0.5  bslib_0.11.0   
+## [17] yaml_2.3.12     otel_0.2.0      rlang_1.3.0     jsonlite_2.0.0</code></pre>
 </div>
 
 

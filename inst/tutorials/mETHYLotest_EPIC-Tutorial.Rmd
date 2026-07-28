@@ -356,14 +356,14 @@ This will:
 
 | Output | Location | Content |
 |---|---|---|
-| Pre-QC plots | `Results/QC_Raw/` | Raw beta distributions, density plots |
+| Pre-QC plots | `Results/QC_Raw/` | Raw beta distributions, density plots, and Recharts JSONs |
 | Post-norm QC | `Results/QC_Normalised/` | Normalised beta distributions |
-| DMP results | `Results/DMP/` | CSV per comparison |
+| DMP results | `Results/DMP/` | CSV (+ optional Excel) + Volcano/Distribution web JSON per comparison |
 | Signatures | `Results/Episignatures/` | Top 500 CpGs (auto) + user-defined |
 | Validation | `Results/Validation/` | HTML benchmark report |
 | DMP Reports | `Results/DMP_Reports/` | Per-signature HTML reports |
 | Pipeline results | `Results/interim/` | All R objects (.rds) |
-| Performance | `Results/Pipeline_Performance.xlsx` | Per-step timing and RAM |
+| Performance | `Results/Pipeline_Performance.csv` | Per-step timing and RAM (optional Excel `.xlsx` via `export_excel = TRUE`) |
 
 ## Example Report
 
@@ -629,8 +629,8 @@ My_EPIC_Project/
 │   └── selected_samples.xlsx
 │
 └── Results/
-    ├── project_config.R
-    ├── Pipeline_Performance.xlsx
+    ├── project_config.R           (contains project_type="EPIC" & export settings)
+    ├── Pipeline_Performance.csv
     ├── interim/
     │   ├── myLoad.rds
     │   ├── myNorm.rds
@@ -638,11 +638,11 @@ My_EPIC_Project/
     │   ├── validation_results.rds
     │   └── pipeline_results.rds
     │
-    ├── QC_Raw/
+    ├── QC_Raw/ (plots & Recharts dynamic web JSONs)
     ├── QC_Normalised/
     ├── QC_Combat/
     ├── CellType/
-    ├── DMP/
+    ├── DMP/ (CSV result tables & volcano/distribution JSONs)
     ├── Episignatures/
     ├── DMP_Reports/
     ├── Validation/
@@ -657,6 +657,10 @@ My_EPIC_Project/
 # Configuration Reference
 
 ```{r config-ref}
+# General & Export Parameters
+cfg$project_type    # "EPIC"
+cfg$export_excel    # FALSE (generates standard CSV and dynamic JSON by default)
+
 # Paths
 cfg$project_dir; cfg$res_dir; cfg$rds_dir
 cfg$pheno_file; cfg$idat_dir
