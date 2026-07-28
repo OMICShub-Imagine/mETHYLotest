@@ -20,7 +20,8 @@ mETHYLotest.NGS.AnnotateDMCs <- function(diff_obj,
                                             assembly,
                                             output_dir,
                                             diff_cutoff = 25,
-                                            qval_cutoff = 0.05) {
+                                            qval_cutoff = 0.05,
+                                            export_excel = FALSE) {
 
   message("\n=== Starting Genomic Annotation ===")
 
@@ -95,14 +96,18 @@ mETHYLotest.NGS.AnnotateDMCs <- function(diff_obj,
       quiet = TRUE
     )
 
-    # Export to Dataframe & Excel
+    # Export to Dataframe & CSV
     df_annotated <- data.frame(dmc_annotated)
     annotated_results[[model_name]] <- df_annotated
 
-    xlsx_path <- file.path(output_dir, paste0("Annotated_DMCs_", safe_name, ".xlsx"))
-    writexl::write_xlsx(df_annotated, xlsx_path)
+    csv_path <- file.path(output_dir, paste0("Annotated_DMCs_", safe_name, ".csv"))
+    utils::write.csv(df_annotated, csv_path, row.names = FALSE)
+    if (isTRUE(export_excel)) {
+      xlsx_path <- file.path(output_dir, paste0("Annotated_DMCs_", safe_name, ".xlsx"))
+      try(writexl::write_xlsx(df_annotated, xlsx_path), silent = TRUE)
+    }
 
-    # Generate Plots
+    # Generate Plots and dynamic summary JSON
     tryCatch({
       p_genes <- annotatr::plot_annotation(
         annotated_regions = dmc_annotated,
@@ -122,6 +127,17 @@ mETHYLotest.NGS.AnnotateDMCs <- function(diff_obj,
       ggplot2::ggsave(filename = file.path(output_dir, paste0("Plot_Genes_", safe_name, ".png")), plot = p_genes, width = 8, height = 6)
       ggplot2::ggsave(filename = file.path(output_dir, paste0("Plot_CpGs_", safe_name, ".png")), plot = p_cpgs, width = 8, height = 6)
 
+      try({
+        if (!is.null(df_annotated$annot.type)) {
+          gene_types <- grep("promoters|5UTRs|exons|introns|3UTRs|intergenic", df_annotated$annot.type, value = TRUE)
+          cpg_types  <- grep("cpg_islands|cpg_shores|cpg_shelves|cpg_inter", df_annotated$annot.type, value = TRUE)
+          gene_summary <- as.data.frame(table(gene_types), stringsAsFactors = FALSE)
+          cpg_summary  <- as.data.frame(table(cpg_types), stringsAsFactors = FALSE)
+          colnames(gene_summary) <- c("feature", "count")
+          colnames(cpg_summary)  <- c("feature", "count")
+          jsonlite::write_json(list(genes = gene_summary, cpgs = cpg_summary), file.path(output_dir, paste0("annotation_summary_", safe_name, ".json")), auto_unbox = TRUE)
+        }
+      }, silent = TRUE)
     }, error = function(e) {
       message("   Warning: Failed to generate plots. ", e$message)
     })

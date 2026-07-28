@@ -16,7 +16,7 @@ mETHYLotest.NGS.QC <- function(methyl_obj,
                                   output_base_dir,
                                   chromosomes = c(paste0("chr", 1:22), "chrX", "chrY", "chrM"),
                                   current_min_cov = 1, unite_destrand = FALSE,
-                                  save_summary = TRUE) {
+                                  save_summary = TRUE, export_excel = FALSE) {
 
   message(paste("--- Starting QC Analysis in:", output_base_dir, "---"))
 
@@ -139,11 +139,19 @@ mETHYLotest.NGS.QC <- function(methyl_obj,
     sheets_list[["Run_Info"]] <- meta_df
 
     if (length(sheets_list) > 0) {
-      summary_file <- file.path(output_base_dir, paste0("QC_Summary_Cov", current_min_cov, ".xlsx"))
-      tryCatch({
-        writexl::write_xlsx(sheets_list, path = summary_file)
-        message(" -> Saved: ", summary_file)
-      }, error = function(e) warning("Failed to save QC Summary Excel: ", e$message))
+      for (sh_name in names(sheets_list)) {
+        csv_file <- file.path(output_base_dir, paste0("QC_", sh_name, "_Cov", current_min_cov, ".csv"))
+        try(utils::write.csv(sheets_list[[sh_name]], csv_file, row.names = FALSE), silent = TRUE)
+      }
+      message(" -> Saved QC summary CSV tables in: ", output_base_dir)
+
+      if (isTRUE(export_excel)) {
+        summary_file <- file.path(output_base_dir, paste0("QC_Summary_Cov", current_min_cov, ".xlsx"))
+        tryCatch({
+          writexl::write_xlsx(sheets_list, path = summary_file)
+          message(" -> Saved: ", summary_file)
+        }, error = function(e) warning("Failed to save QC Summary Excel: ", e$message))
+      }
     }
   }
 

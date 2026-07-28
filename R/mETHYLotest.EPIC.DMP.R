@@ -35,7 +35,7 @@ mETHYLotest.EPIC.DMP <- function(beta             = NULL,
                                 output_directory = file.path(getwd(), "DMP_Results"),
                                 ctl_label_standardize = TRUE,
                                 save_csv         = TRUE,
-                                save_excel       = TRUE,
+                                save_excel       = FALSE,
                                 save_RDS         = NULL) {
 
   # ── Input checks ───────────────────────────────────────────────────────────

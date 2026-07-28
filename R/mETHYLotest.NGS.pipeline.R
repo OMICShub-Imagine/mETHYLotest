@@ -678,6 +678,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
   if (!is.null(pca_res) && !is.null(pca_res$x)) {
     pca_coords <- data.frame(Sample_Name = rownames(pca_res$x), pca_res$x)
     write.csv(pca_coords, file.path(fig_dir, "PCA_coords.csv"), row.names = FALSE)
+    try(jsonlite::write_json(pca_coords, file.path(fig_dir, "pca_coords.json")), silent = TRUE)
   }
 
   # Export to QC dir for further reporting
@@ -688,6 +689,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
     file.copy(file.path(fig_dir, "Sample_Clustering.png"), file.path(qc_dir, "Sample_Clustering.png"), overwrite=TRUE)
     file.copy(file.path(fig_dir, "QC_PCA.png"), file.path(qc_dir, "QC_PCA.png"), overwrite=TRUE)
     file.copy(file.path(fig_dir, "PCA_coords.csv"), file.path(qc_dir, "PCA_coords.csv"), overwrite=TRUE)
+    file.copy(file.path(fig_dir, "pca_coords.json"), file.path(qc_dir, "pca_coords.json"), overwrite=TRUE)
     file.copy(file.path(interim_dir, "clustering_hc_object.rds"), file.path(qc_dir, "clustering_hc_object.rds"), overwrite=TRUE)
   }, error = function(e) warning("Failed to copy QC files: ", e$message))
 
@@ -961,10 +963,11 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
         # ── Enrich with group means and status ──
         df_res <- enrich_dmc_df(df_res)
 
-        # Excel
-        writexl::write_xlsx(
-          df_res,
-          file.path(results_dir, paste0("DMC_", safe, ".xlsx")))
+        # CSV & optional Excel
+        utils::write.csv(df_res, file.path(results_dir, paste0("DMC_", safe, ".csv")), row.names = FALSE)
+        if (isTRUE(cfg$export_excel)) {
+          try(writexl::write_xlsx(df_res, file.path(results_dir, paste0("DMC_", safe, ".xlsx"))), silent = TRUE)
+        }
 
         # BED
         bed <- data.frame(
@@ -1009,7 +1012,13 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
                                             column_title = "Samples")
               ComplexHeatmap::draw(ht)
               dev.off()
-              message("[mETHYLotest]   Heatmap exported: Heatmap_", safe, ".png")
+              try({
+                heatmap_df <- as.data.frame(mat)
+                heatmap_df$Position <- rownames(heatmap_df)
+                jsonlite::write_json(heatmap_df, file.path(results_dir, paste0("heatmap_data_", safe, ".json")))
+                utils::write.csv(heatmap_df, file.path(results_dir, paste0("heatmap_data_", safe, ".csv")), row.names = FALSE)
+              }, silent = TRUE)
+              message("[mETHYLotest]   Heatmap and JSON exported: Heatmap_", safe, ".png/json")
             }
           }, error = function(e) {
             message("[mETHYLotest]   Warning: Could not generate Heatmap: ", e$message)
@@ -1040,24 +1049,24 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
 
         if (n_relaxed > 0L) {
           df_relaxed <- methylKit::getData(res_relaxed)
-          df_relaxed <- enrich_dmc_df(df_relaxed)
-          writexl::write_xlsx(
-            df_relaxed,
-            file.path(results_dir,
-                      paste0("DMC_relaxed_", safe, ".xlsx")))
+          utils::write.csv(df_relaxed, file.path(results_dir, paste0("DMC_relaxed_", safe, ".csv")), row.names = FALSE)
+          if (isTRUE(cfg$export_excel)) {
+            try(writexl::write_xlsx(df_relaxed, file.path(results_dir, paste0("DMC_relaxed_", safe, ".xlsx"))), silent = TRUE)
+          }
           message("[mETHYLotest]   Relaxed export saved: DMC_relaxed_",
-                  safe, ".xlsx")
+                  safe, ".csv")
           any_exported <- TRUE
         }
       }
 
       # Always export full results (all positions, no filter)
       raw_df <- enrich_dmc_df(raw_df)
-      full_path <- file.path(results_dir,
-                             paste0("Full_", safe, ".xlsx"))
-      tryCatch(
-        writexl::write_xlsx(raw_df, full_path),
-        error = function(e) NULL)
+      full_path_csv <- file.path(results_dir, paste0("Full_", safe, ".csv"))
+      tryCatch(utils::write.csv(raw_df, full_path_csv, row.names = FALSE), error = function(e) NULL)
+      if (isTRUE(cfg$export_excel)) {
+        full_path <- file.path(results_dir, paste0("Full_", safe, ".xlsx"))
+        tryCatch(writexl::write_xlsx(raw_df, full_path), error = function(e) NULL)
+      }
 
       # Generate Volcano Plot
       tryCatch({
@@ -1076,6 +1085,10 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
             ggplot2::theme_minimal() +
             ggplot2::labs(title = paste("Volcano Plot:", safe), x = "Diff Meth (%)", y = "-log10(Q-value)")
           ggplot2::ggsave(file.path(results_dir, paste0("Volcano_", safe, ".png")), plot = p_volc, width = 8, height = 6)
+          try({
+            volc_json_df <- plot_df[, intersect(colnames(plot_df), c("chr", "start", "end", "meth.diff", "qvalue", "status", "logQ"))]
+            jsonlite::write_json(volc_json_df, file.path(results_dir, paste0("volcano_data_", safe, ".json")))
+          }, silent = TRUE)
         }
       }, error = function(e) warning("[mETHYLotest] Failed to generate Volcano plot: ", e$message))
 
@@ -1087,10 +1100,15 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
             ggplot2::theme_minimal() +
             ggplot2::labs(title = paste("Q-Value Distribution:", safe), x = "Q-Value", y = "Count")
           ggplot2::ggsave(file.path(results_dir, paste0("Distribution_", safe, ".png")), plot = p_dist, width = 8, height = 6)
+          try({
+            h_q <- hist(raw_df$qvalue, breaks=50, plot=FALSE)
+            q_dist_df <- data.frame(bin = h_q$mids, count = h_q$counts)
+            jsonlite::write_json(q_dist_df, file.path(results_dir, paste0("distribution_data_", safe, ".json")))
+          }, silent = TRUE)
         }
       }, error = function(e) warning("[mETHYLotest] Failed to generate Distribution plot: ", e$message))
 
-      message("[mETHYLotest]   Full results: Full_", safe, ".xlsx",
+      message("[mETHYLotest]   Full results: Full_", safe, ".csv",
               " (", nrow(raw_df), " positions)")
     }
 
@@ -1298,19 +1316,19 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
                                 nrow(df_tiles), 1), "%)")
 
           # Export ALL DMRs (with confidence)
-          writexl::write_xlsx(
-            df_tiles,
-            file.path(tiles_dir,
-                      paste0("DMR_tiles_", safe, "_all.xlsx")))
+          utils::write.csv(df_tiles, file.path(tiles_dir, paste0("DMR_tiles_", safe, "_all.csv")), row.names = FALSE)
+          if (isTRUE(cfg$export_excel)) {
+            try(writexl::write_xlsx(df_tiles, file.path(tiles_dir, paste0("DMR_tiles_", safe, "_all.xlsx"))), silent = TRUE)
+          }
 
           # Export supported only (>= 1 DMP)
           df_supported <- df_tiles[df_tiles$Confidence != "Unsupported", ]
 
           if (nrow(df_supported) > 0L) {
-            writexl::write_xlsx(
-              df_supported,
-              file.path(tiles_dir,
-                        paste0("DMR_tiles_", safe, ".xlsx")))
+            utils::write.csv(df_supported, file.path(tiles_dir, paste0("DMR_tiles_", safe, ".csv")), row.names = FALSE)
+            if (isTRUE(cfg$export_excel)) {
+              try(writexl::write_xlsx(df_supported, file.path(tiles_dir, paste0("DMR_tiles_", safe, ".xlsx"))), silent = TRUE)
+            }
 
             # BED (supported only)
             bed <- data.frame(
@@ -1373,6 +1391,11 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
                     width = 8, height = 6
                   )
                   write.csv(pm_top, file.path(tiles_dir, sprintf("Heatmap_tiles_data_%s.csv", safe)))
+                  try({
+                    hm_tiles_df <- as.data.frame(pm_top)
+                    hm_tiles_df$Region <- rownames(hm_tiles_df)
+                    jsonlite::write_json(hm_tiles_df, file.path(tiles_dir, sprintf("heatmap_tiles_data_%s.json", safe)))
+                  }, silent = TRUE)
                 } else {
                   message("[mETHYLotest]   pheatmap not installed.")
                 }
@@ -1465,10 +1488,10 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
                       df_supported$Mean_CTL[sig_valid], 2)
 
                 # Re-export enriched supported DMRs
-                writexl::write_xlsx(
-                  df_supported,
-                  file.path(tiles_dir,
-                            paste0("DMR_tiles_", safe, ".xlsx")))
+                utils::write.csv(df_supported, file.path(tiles_dir, paste0("DMR_tiles_", safe, ".csv")), row.names = FALSE)
+                if (isTRUE(cfg$export_excel)) {
+                  try(writexl::write_xlsx(df_supported, file.path(tiles_dir, paste0("DMR_tiles_", safe, ".xlsx"))), silent = TRUE)
+                }
               }
 
               rm(tiles_perc, tiles_data, tiles_pos)
@@ -1487,14 +1510,12 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
         }
 
         # Full export
-        tryCatch(
-          writexl::write_xlsx(
-            raw_tiles,
-            file.path(tiles_dir,
-                      paste0("Full_tiles_", safe, ".xlsx"))),
-          error = function(e) NULL)
+        tryCatch(utils::write.csv(raw_tiles, file.path(tiles_dir, paste0("Full_tiles_", safe, ".csv")), row.names = FALSE), error = function(e) NULL)
+        if (isTRUE(cfg$export_excel)) {
+          tryCatch(writexl::write_xlsx(raw_tiles, file.path(tiles_dir, paste0("Full_tiles_", safe, ".xlsx"))), error = function(e) NULL)
+        }
         message("[mETHYLotest]   Full results: Full_tiles_", safe,
-                ".xlsx (", nrow(raw_tiles), " regions)")
+                ".csv (", nrow(raw_tiles), " regions)")
       }
 
       saveRDS(tiles_results,
@@ -1553,8 +1574,10 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
 
         # Export
         if (nrow(seg_df) > 0L) {
-          writexl::write_xlsx(
-            seg_df, file.path(seg_dir, "segments.xlsx"))
+          utils::write.csv(seg_df, file.path(seg_dir, "segments.csv"), row.names = FALSE)
+          if (isTRUE(cfg$export_excel)) {
+            try(writexl::write_xlsx(seg_df, file.path(seg_dir, "segments.xlsx")), silent = TRUE)
+          }
 
           # BED
           bed <- data.frame(
@@ -1750,11 +1773,12 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
 
   annotated_data <- tryCatch({
     mETHYLotest.NGS.AnnotateDMCs(
-      diff_obj    = diff_results,
-      assembly    = cfg$assembly,
-      output_dir  = file.path(res_dir, "Annotation"),
-      diff_cutoff = annot_diff,
-      qval_cutoff = annot_qval)
+      diff_obj     = diff_results,
+      assembly     = cfg$assembly,
+      output_dir   = file.path(res_dir, "Annotation"),
+      diff_cutoff  = annot_diff,
+      qval_cutoff  = annot_qval,
+      export_excel = isTRUE(cfg$export_excel))
   }, error = function(e) {
     warning("[mETHYLotest] Annotation failed: ", e$message,
             "\n  Tip: install TxDb package with BiocManager::install('TxDb.Hsapiens.UCSC.",
@@ -1835,8 +1859,10 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
   profile_df$Total_sec <- total_elapsed
   profile_df$Disk_MB   <- disk_mb
   saveRDS(profile_df, file.path(rds_dir, "pipeline_profile.rds"))
-  writexl::write_xlsx(profile_df,
-                      file.path(res_dir, "Pipeline_Performance.xlsx"))
+  utils::write.csv(profile_df, file.path(res_dir, "Pipeline_Performance.csv"), row.names = FALSE)
+  if (isTRUE(cfg$export_excel)) {
+    try(writexl::write_xlsx(profile_df, file.path(res_dir, "Pipeline_Performance.xlsx")), silent = TRUE)
+  }
 
   # Final messages and return
 

@@ -1237,6 +1237,7 @@ mETHYLotest.NGS.ProjectUI <- function(prefill_pheno = NULL) {
         "# Package Version & Platform Type",
         sprintf('project_config$mETHYLotest_version <- "%s"', as.character(utils::packageVersion("mETHYLotest"))),
         'project_config$project_type        <- "NGS"',
+        'project_config$export_excel        <- FALSE',
         "",
         "# Paths",
         sprintf('project_config$project_name <- "%s"',

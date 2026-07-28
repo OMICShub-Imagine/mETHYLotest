@@ -873,6 +873,10 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
             ggplot2::theme_minimal() +
             ggplot2::labs(title = paste("Volcano Plot:", comp), x = "logFC", y = "-log10(adj.P.Val)")
           ggplot2::ggsave(file.path(dmp_dir, paste0("Volcano_", safe, ".png")), plot = p_volc, width = 8, height = 6)
+          try({
+            v_cols <- intersect(colnames(df_volc), c("logFC", "adj.P.Val", "P.Value", "status", "logQ", "CHR", "MAPINFO", "Gene_Name"))
+            jsonlite::write_json(df_volc[, v_cols, drop = FALSE], file.path(dmp_dir, paste0("volcano_data_", safe, ".json")))
+          }, silent = TRUE)
         }
       }, error = function(e) warning("[mETHYLotest] Failed to generate Volcano plot: ", e$message))
       
@@ -885,6 +889,11 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
             ggplot2::theme_minimal() +
             ggplot2::labs(title = paste("P-Value Distribution:", comp), x = "P-Value", y = "Count")
           ggplot2::ggsave(file.path(dmp_dir, paste0("Distribution_", safe, ".png")), plot = p_dist, width = 8, height = 6)
+          try({
+            h_p <- hist(df_dist$P.Value, breaks=50, plot=FALSE)
+            p_dist_df <- data.frame(bin = h_p$mids, count = h_p$counts)
+            jsonlite::write_json(p_dist_df, file.path(dmp_dir, paste0("distribution_data_", safe, ".json")))
+          }, silent = TRUE)
         }
       }, error = function(e) warning("[mETHYLotest] Failed to generate Distribution plot: ", e$message))
     }
@@ -1494,8 +1503,10 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
   profile_df$Total_sec <- total_elapsed
   profile_df$Disk_MB   <- disk_mb
   saveRDS(profile_df, file.path(rds_dir, "pipeline_profile.rds"))
-  writexl::write_xlsx(profile_df,
-                      file.path(res_dir, "Pipeline_Performance.xlsx"))
+  utils::write.csv(profile_df, file.path(res_dir, "Pipeline_Performance.csv"), row.names = FALSE)
+  if (isTRUE(cfg$export_excel)) {
+    try(writexl::write_xlsx(profile_df, file.path(res_dir, "Pipeline_Performance.xlsx")), silent = TRUE)
+  }
 
   # ========================================================================
   # JSON EXPORTS FOR FUTURE WORKS

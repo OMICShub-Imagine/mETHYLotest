@@ -70,7 +70,8 @@ mETHYLotest.EPIC.QC <- function(myLoad,
                                doDetPSummary      = TRUE,   # fixed: was missing
                                det_p_cut          = 0.01,   # fixed: was hardcoded
                                doSexPrediction    = TRUE,   # fixed: was missing
-                               run_interactive_ui = TRUE) {
+                               run_interactive_ui = TRUE,
+                               export_excel       = FALSE) {
 
   message("[mETHYLotest EPIC QC] Starting QC pipeline.")
 
@@ -274,24 +275,29 @@ mETHYLotest.EPIC.QC <- function(myLoad,
       excel_data_list$Sex_Prediction <- qc_results$plots$sex_pred$data
   }
 
-  # ── 13. Excel export ───────────────────────────────────────────────────────
-  # fixed: moved after all plots so all data is captured
+  # ── 13. Excel & CSV export ──────────────────────────────────────────────────
   if (length(excel_data_list) > 0L) {
-    message("[mETHYLotest EPIC QC] Saving QC metrics to Excel...")
-
-    xl_path <- file.path(normalizePath(outputDir), "QC_metrics.xlsx")
-    wb      <- openxlsx::createWorkbook()
-
+    message("[mETHYLotest EPIC QC] Saving QC metrics to CSV...")
     for (sheet in names(excel_data_list)) {
-      openxlsx::addWorksheet(wb, sheet)
-      openxlsx::writeData(wb,
-                          sheet    = sheet,
-                          x        = excel_data_list[[sheet]],
-                          rowNames = TRUE)
+      csv_path <- file.path(normalizePath(outputDir), paste0("QC_", sheet, ".csv"))
+      try(utils::write.csv(excel_data_list[[sheet]], csv_path, row.names = TRUE), silent = TRUE)
     }
 
-    openxlsx::saveWorkbook(wb, file = xl_path, overwrite = TRUE)
-    message("[mETHYLotest EPIC QC] Excel saved: ", xl_path)
+    if (isTRUE(export_excel)) {
+      message("[mETHYLotest EPIC QC] Saving QC metrics to Excel...")
+      xl_path <- file.path(normalizePath(outputDir), "QC_metrics.xlsx")
+      wb      <- openxlsx::createWorkbook()
+
+      for (sheet in names(excel_data_list)) {
+        openxlsx::addWorksheet(wb, sheet)
+        openxlsx::writeData(wb,
+                            sheet    = sheet,
+                            x        = excel_data_list[[sheet]],
+                            rowNames = TRUE)
+      }
+      openxlsx::saveWorkbook(wb, file = xl_path, overwrite = TRUE)
+      message("[mETHYLotest EPIC QC] Excel saved: ", xl_path)
+    }
   }
 
   # ── 14. HTML report ────────────────────────────────────────────────────────
@@ -334,6 +340,7 @@ mETHYLotest.EPIC.QC <- function(myLoad,
         }
       }
       jsonlite::write_json(pca_df, file.path(qc_raw_dir, "pca_coords.json"))
+      jsonlite::write_json(pca_df, file.path(normalizePath(outputDir), "pca_coords.json"))
     }
 
     # Export Beta Density
@@ -350,6 +357,7 @@ mETHYLotest.EPIC.QC <- function(myLoad,
         density_df[[sample_name]] <- round(y_vals, 3)
       }
       jsonlite::write_json(density_df, file.path(qc_raw_dir, "beta_density.json"))
+      jsonlite::write_json(density_df, file.path(normalizePath(outputDir), "beta_density.json"))
     }
   }, error = function(e) {
     warning("[mETHYLotest EPIC QC] Failed to export JSON files: ", e$message)
