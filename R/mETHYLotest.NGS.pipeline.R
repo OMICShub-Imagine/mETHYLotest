@@ -1006,7 +1006,8 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
               png(file.path(results_dir, paste0("Heatmap_", safe, ".png")), width = 800, height = 800, res = 120)
               ht <- ComplexHeatmap::Heatmap(mat, name = "Meth %",
                                             top_annotation = ha,
-                                            show_row_names = FALSE,
+                                            show_row_names = TRUE,
+                                            row_names_gp = grid::gpar(fontsize = 8),
                                             show_column_names = TRUE,
                                             row_title = "Top DMCs",
                                             column_title = "Samples")
@@ -1371,12 +1372,13 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
               if (length(idx_top) > 0) {
                 pm_top <- tiles_perc[idx_top, , drop=FALSE]
                 rownames(pm_top) <- top50_pos[1:length(idx_top)]
-                colnames(pm_top) <- keep_ids
+                s_ids <- methylKit::getSampleID(tiles)
+                colnames(pm_top) <- s_ids
 
                 if (requireNamespace("pheatmap", quietly = TRUE)) {
                   annot_col <- data.frame(
-                    Group = ifelse(seq_along(keep_ids) %in% case_idx, "Test", "Control"),
-                    row.names = keep_ids
+                    Group = ifelse(seq_along(s_ids) %in% case_idx, "Test", "Control"),
+                    row.names = s_ids
                   )
 
                   pheatmap::pheatmap(
@@ -1385,10 +1387,11 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
                     cluster_cols = TRUE,
                     show_colnames = TRUE,
                     annotation_col = annot_col,
-                    show_rownames = FALSE,
+                    show_rownames = TRUE,
+                    fontsize_row = 8,
                     main = sprintf("Top 50 DMRs Heatmap - %s", safe),
                     filename = file.path(tiles_dir, sprintf("Heatmap_tiles_%s.png", safe)),
-                    width = 8, height = 6
+                    width = 8, height = 7
                   )
                   write.csv(pm_top, file.path(tiles_dir, sprintf("Heatmap_tiles_data_%s.csv", safe)))
                   try({

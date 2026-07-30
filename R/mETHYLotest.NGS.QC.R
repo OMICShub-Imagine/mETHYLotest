@@ -97,7 +97,29 @@ mETHYLotest.NGS.QC <- function(methyl_obj,
     )
   }, error = function(e) return(NULL))
 
-  # --- 4. Sauvegarde Excel Récapitulatif ---
+  # --- 4. Global methylation per sample ---
+  df_global_meth <- tryCatch({
+    gm_list <- lapply(seq_along(methyl_obj), function(i) {
+      d   <- methylKit::getData(methyl_obj[[i]])
+      sid <- methylKit::getSampleID(methyl_obj)[[i]]
+      if (nrow(d) == 0) return(NULL)
+      total_C <- sum(as.numeric(d$numCs))
+      total_T <- sum(as.numeric(d$numTs))
+      total   <- total_C + total_T
+      data.frame(
+        Sample          = sid,
+        Global_Meth_Pct = if (total > 0) round(100 * total_C / total, 2) else NA_real_,
+        Total_Cs        = total_C,
+        Total_Ts        = total_T,
+        Total_Reads     = total,
+        N_Positions     = nrow(d),
+        stringsAsFactors = FALSE
+      )
+    })
+    do.call(rbind, gm_list)
+  }, error = function(e) NULL)
+
+  # --- 5. Sauvegarde Excel Récapitulatif ---
   if (save_summary) {
     message("Saving comprehensive QC Summary Excel...")
 
@@ -108,6 +130,7 @@ mETHYLotest.NGS.QC <- function(methyl_obj,
     if (!is.null(stats_df))    sheets_list[["Positions"]]   <- stats_df
     if (!is.null(c_stats))     sheets_list[["Coverage_CT"]] <- c_stats
     if (!is.null(df_controls)) sheets_list[["Controls"]]    <- df_controls
+    if (!is.null(df_global_meth)) sheets_list[["Global_Meth"]] <- df_global_meth
 
     # Calculate methylation histogram
     meth_hist_df <- data.frame()
@@ -155,27 +178,7 @@ mETHYLotest.NGS.QC <- function(methyl_obj,
     }
   }
 
-  # --- 5. Global methylation per sample ---
-  df_global_meth <- tryCatch({
-    gm_list <- lapply(seq_along(methyl_obj), function(i) {
-      d   <- methylKit::getData(methyl_obj[[i]])
-      sid <- methylKit::getSampleID(methyl_obj)[[i]]
-      if (nrow(d) == 0) return(NULL)
-      total_C <- sum(as.numeric(d$numCs))
-      total_T <- sum(as.numeric(d$numTs))
-      total   <- total_C + total_T
-      data.frame(
-        Sample          = sid,
-        Global_Meth_Pct = if (total > 0) round(100 * total_C / total, 2) else NA_real_,
-        Total_Cs        = total_C,
-        Total_Ts        = total_T,
-        Total_Reads     = total,
-        N_Positions     = nrow(d),
-        stringsAsFactors = FALSE
-      )
-    })
-    do.call(rbind, gm_list)
-  }, error = function(e) NULL)
+  # (Global meth calculation moved up)
 
   # --- 6. Export JSON for future works ---
   message("Exporting JSON files for future works...")
