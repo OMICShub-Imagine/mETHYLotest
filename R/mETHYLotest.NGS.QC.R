@@ -16,7 +16,8 @@ mETHYLotest.NGS.QC <- function(methyl_obj,
                                   output_base_dir,
                                   chromosomes = c(paste0("chr", 1:22), "chrX", "chrY", "chrM"),
                                   current_min_cov = 1, unite_destrand = FALSE,
-                                  save_summary = TRUE, export_excel = FALSE) {
+                                  save_summary = TRUE, export_excel = FALSE,
+                                  precomputed_controls = NULL) {
 
   message(paste("--- Starting QC Analysis in:", output_base_dir, "---"))
 
@@ -77,11 +78,15 @@ mETHYLotest.NGS.QC <- function(methyl_obj,
   }, error = function(e) return(NULL))
 
   # B. Statistiques des contrôles
-  df_controls <- tryCatch({
-    mETHYLotest.NGS.get_control_stats(
-      methyl_obj, save_plot_to = file.path(dir_qc, "control_methylation.png")
-    )
-  }, error = function(e) return(NULL))
+  df_controls <- if (!is.null(precomputed_controls)) {
+    precomputed_controls
+  } else {
+    tryCatch({
+      mETHYLotest.NGS.get_control_stats(
+        methyl_obj, save_plot_to = file.path(dir_qc, "control_methylation.png")
+      )
+    }, error = function(e) return(NULL))
+  }
 
   # C. Statistiques de positions
   stats_df <- tryCatch({
@@ -220,13 +225,39 @@ mETHYLotest.NGS.QC <- function(methyl_obj,
       names(chr_meth) <- c("chr", "mean_meth")
       chromosomes_set <- unique(c(chromosomes_set, as.character(chr_meth$chr)))
       
+      # Controls format for JSON
+      if (!is.null(df_controls)) {
+        s_ctrls <- df_controls[df_controls$Sample == sid, ]
+        if (nrow(s_ctrls) > 0) {
+          control_expected <- list("pUC19"="high", "lambda"="high", "NC_000913"="low", "phiX"="low", "PhiX"="low", "NC_001422"="low", "NC_001604"="low")
+          exp_vec <- vapply(s_ctrls$Chromosome, function(ch) {
+            for (pat in names(control_expected)) {
+              if (grepl(pat, ch, ignore.case = TRUE)) return(control_expected[[pat]])
+            }
+            return("unknown")
+          }, character(1))
+          
+          ctrl_meth_df <- data.frame(
+            chr = s_ctrls$Chromosome,
+            mean_meth = s_ctrls$MethylationPercentage,
+            expected = exp_vec,
+            stringsAsFactors = FALSE
+          )
+        } else {
+          ctrl_meth_df <- list()
+        }
+      } else {
+        ctrl_meth_df <- list()
+      }
+      
       qc_data[[sid]] <- list(
         global_meth_pct = global_meth_pct,
         total_positions = nrow(data),
         total_reads = total_cov,
         meth_hist = meth_hist,
         cov_hist = cov_hist,
-        chr_meth = chr_meth
+        chr_meth = chr_meth,
+        ctrl_meth = ctrl_meth_df
       )
     }
     

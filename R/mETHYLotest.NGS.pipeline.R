@@ -462,12 +462,13 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
 
     # ── Run QC analysis ──
     qc_data <- mETHYLotest.NGS.QC(
-      methyl_obj      = temp_filt,
-      output_base_dir = qc_dir,
-      chromosomes     = kept_chrs,
-      current_min_cov = current_cov,
-      unite_destrand  = cfg$unite_destrand,
-      save_summary    = TRUE)
+      methyl_obj           = temp_filt,
+      output_base_dir      = qc_dir,
+      chromosomes          = kept_chrs,
+      current_min_cov      = current_cov,
+      unite_destrand       = cfg$unite_destrand,
+      save_summary         = TRUE,
+      precomputed_controls = all_controls_precomputed)
 
     # ── Treatment lookup from Pheno (active samples only) ──
     active_treatments <- setNames(
