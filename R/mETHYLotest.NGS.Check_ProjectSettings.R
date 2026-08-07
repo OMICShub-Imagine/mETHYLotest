@@ -301,12 +301,6 @@ mETHYLotest.NGS.Check_ProjectSettings <- function(params_file = NULL) {
       (cfg$diff_qvalue <= 0 || cfg$diff_qvalue > 1))
     errors <- c(errors, "diff_qvalue must be (0,1].")
 
-  if (!is.null(cfg$annot_diff_cutoff) &&
-      (cfg$annot_diff_cutoff < 0 || cfg$annot_diff_cutoff > 100))
-    warnings <- c(warnings, "annot_diff_cutoff outside [0,100].")
-  if (!is.null(cfg$annot_qval_cutoff) &&
-      (cfg$annot_qval_cutoff <= 0 || cfg$annot_qval_cutoff > 1))
-    warnings <- c(warnings, "annot_qval_cutoff outside (0,1].")
 
   # ========================================================================
   # 7. STATISTICAL ADJUSTMENTS

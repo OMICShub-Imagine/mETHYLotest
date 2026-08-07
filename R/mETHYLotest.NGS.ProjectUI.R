@@ -469,41 +469,6 @@ mETHYLotest.NGS.ProjectUI <- function(prefill_pheno = NULL) {
             )
           ),
 
-          # Coverage Normalization
-          fluidRow(
-            shinydashboard::box(
-              title = tagList(icon("balance-scale"),
-                              " Coverage Normalization"),
-              status = "primary", solidHeader = TRUE, width = 12,
-
-              div(class = "alert alert-info",
-                  style = "font-size:12px; padding:10px;",
-                  icon("info-circle"),
-                  " Normalizes coverage between samples using ",
-                  tags$code("methylKit::normalizeCoverage()"), ".",
-                  " Recommended when samples have very different",
-                  " sequencing depths."),
-
-              checkboxInput("do_normalize_coverage",
-                            strong(" Enable Coverage Normalization"),
-                            value = FALSE),
-
-              conditionalPanel(
-                "input.do_normalize_coverage == true",
-                div(class = "param-section",
-                    selectInput("normalize_cov_method",
-                                "Method",
-                                choices = c("median", "mean"),
-                                selected = "median"),
-                    helpText(
-                      tags$b("median:"),
-                      " Scales to median coverage (robust).", br(),
-                      tags$b("mean:"),
-                      " Scales to mean coverage.")
-                )
-              )
-            )
-          ),
 
           # Clustering
           fluidRow(
@@ -730,7 +695,6 @@ mETHYLotest.NGS.ProjectUI <- function(prefill_pheno = NULL) {
       "pheno_path", "btn_pheno_path", "load_check_btn",
       "mk_assembly", "mk_context", "save_raw_rds",
       "pipeline_type", "mk_pipeline", "tech_preset",
-      "do_normalize_coverage", "normalize_cov_method",
       "col_chr", "col_start", "col_end",
       "col_coverage", "col_freqC", "col_strand",
       "col_fraction", "coord_offset",
@@ -959,8 +923,6 @@ mETHYLotest.NGS.ProjectUI <- function(prefill_pheno = NULL) {
 
             # Analysis params
             .uc("unite_destrand")
-            .uc("do_normalize_coverage")
-            .us("normalize_cov_method")
             .us("cluster_dist"); .us("cluster_method")
             .us("diff_overdispersion"); .us("diff_test")
             .un("diff_cutoff"); .un("diff_qvalue")
@@ -1280,12 +1242,6 @@ mETHYLotest.NGS.ProjectUI <- function(prefill_pheno = NULL) {
         "# Unite",
         sprintf("project_config$unite_destrand <- %s",
                 fmt_bool(input$unite_destrand)),
-        "",
-        "# Coverage Normalization",
-        sprintf("project_config$do_normalize_coverage <- %s",
-                fmt_bool(input$do_normalize_coverage)),
-        sprintf('project_config$normalize_cov_method  <- "%s"',
-                null_or(input$normalize_cov_method, "median")),
         "",
         "# Clustering",
         sprintf('project_config$cluster_dist   <- "%s"',
