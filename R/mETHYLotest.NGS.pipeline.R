@@ -767,62 +767,115 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
   }
   message("[mETHYLotest] Using ", safe_cores, " core(s) for DiffMeth")
 
+  # ── Identifiability Check ──
+  is_identifiable <- function(treatment, covs) {
+    if (is.null(covs) || ncol(covs) == 0) return(list(ok=TRUE))
+    mm <- tryCatch(
+      model.matrix(~ as.factor(treatment) + ., data = covs),
+      error = function(e) NULL
+    )
+    if (is.null(mm)) return(list(ok=FALSE, reason="Failed to build model matrix"))
+    r <- qr(mm)$rank
+    if (r < ncol(mm)) {
+      return(list(ok=FALSE, reason="Design is rank-deficient (aliasing between treatment and covariates or among covariates)"))
+    }
+    if (nrow(mm) - r < 2) {
+      return(list(ok=FALSE, reason="Residual degrees of freedom < 2"))
+    }
+    return(list(ok=TRUE))
+  }
+
   # ── Safe calculateDiffMeth wrapper ──
-  safe_calcDiffMeth <- function(meth, covs, od, tst, nc) {
-    result <- NULL; ok <- TRUE
+  safe_calcDiffMeth <- function(meth_obj, covs, od, tst, nc, label, attempt_index, fallback_used) {
+    result <- NULL
+    ok <- TRUE
+    incidents <- character()
+    
+    record_incident <- function(msg) { incidents <<- c(incidents, msg) }
+    start_time <- Sys.time()
+    
     tryCatch(
       withCallingHandlers({
         result <- methylKit::calculateDiffMeth(
-          meth, covariates = covs, overdispersion = od,
+          meth_obj, covariates = covs, overdispersion = od,
           test = tst, mc.cores = nc)
       }, warning = function(w) {
-        if (grepl("scheduled cores encountered errors", w$message)) {
-          ok <<- FALSE; invokeRestart("muffleWarning")
+        msg <- conditionMessage(w)
+        record_incident(sprintf("[WARNING] %s", msg))
+        if (grepl("scheduled core", msg, ignore.case = TRUE)) {
+          ok <<- FALSE
         }
+        invokeRestart("muffleWarning")
       }),
-      error = function(e) { ok <<- FALSE }
+      error = function(e) { 
+          msg <- conditionMessage(e)
+          record_incident(sprintf("[ERROR] %s", msg))
+          ok <<- FALSE 
+      }
     )
+    
+    elapsed <- as.numeric(difftime(Sys.time(), start_time, units="secs"))
     if (!ok) return(NULL)
-    result
+    
+    attr(result, "params_used") <- list(
+        label = label,
+        covariates = if(is.null(covs)) "none" else paste(colnames(covs), collapse=","),
+        overdispersion = od,
+        test = tst,
+        mc.cores = nc,
+        attempt_index = attempt_index,
+        fallback_used = fallback_used,
+        incidents = incidents,
+        timestamp = Sys.time()
+    )
+    return(result)
   }
 
   diff_results <- list()
+  allow_fallback <- isTRUE(cfg$allow_fallback)
 
   for (model in names(scenarios)) {
     message("[mETHYLotest] Running: ", model, " [", scenarios[[model]]$desc, "]")
     covs <- scenarios[[model]]$covariates
 
-    if (!is.null(covs) && min(table(meth@treatment)) <= (ncol(covs) + 1)) {
-      warning("[mETHYLotest] Skipping ", model, ": overfitting risk.")
+    ident_check <- is_identifiable(meth@treatment, covs)
+    if (!ident_check$ok) {
+      message("[mETHYLotest] [SKIP] ", model, " : ", ident_check$reason)
       next
     }
 
     # Try 1: safe_cores
-    res <- safe_calcDiffMeth(meth, covs, overdispersion, diff_test, safe_cores)
+    res <- safe_calcDiffMeth(meth, covs, overdispersion, diff_test, safe_cores, model, 1L, FALSE)
 
-    # Try 2: 1 core
-    if (is.null(res) && safe_cores > 1L) {
-      message("[mETHYLotest]   Retrying with mc.cores=1...")
-      res <- safe_calcDiffMeth(meth, covs, overdispersion, diff_test, 1L)
-    }
-
-    # Try 3: simplified
-    if (is.null(res)) {
-      message("[mETHYLotest]   Retrying with overdispersion='none'...")
-      res <- safe_calcDiffMeth(meth, covs, "none", "Chisq", 1L)
-    }
-
-    # Try 4: without covariates
-    if (is.null(res) && !is.null(covs)) {
-      message("[mETHYLotest]   Fallback without covariates...")
-      res <- safe_calcDiffMeth(meth, NULL, "none", "Chisq", 1L)
+    # Fallbacks (Opt-in)
+    fallback_suffix <- ""
+    
+    if (is.null(res) && allow_fallback) {
+      if (safe_cores > 1L) {
+        message("[mETHYLotest]   Retrying with mc.cores=1...")
+        res <- safe_calcDiffMeth(meth, covs, overdispersion, diff_test, 1L, model, 2L, TRUE)
+        if (!is.null(res)) fallback_suffix <- "__FALLBACK_1core"
+      }
+      
+      if (is.null(res)) {
+        message("[mETHYLotest]   Retrying with overdispersion='none'...")
+        res <- safe_calcDiffMeth(meth, covs, "none", "Chisq", 1L, model, 3L, TRUE)
+        if (!is.null(res)) fallback_suffix <- "__FALLBACK_no_MN"
+      }
+      
+      if (is.null(res) && !is.null(covs)) {
+        message("[mETHYLotest]   Fallback without covariates...")
+        res <- safe_calcDiffMeth(meth, NULL, "none", "Chisq", 1L, model, 4L, TRUE)
+        if (!is.null(res)) fallback_suffix <- "__FALLBACK_no_cov"
+      }
     }
 
     if (!is.null(res)) {
-      diff_results[[model]] <- res
-      message("[mETHYLotest] ", model, ": success.")
+      final_model_name <- paste0(model, fallback_suffix)
+      diff_results[[final_model_name]] <- res
+      message("[mETHYLotest] ", final_model_name, ": success.")
     } else {
-      message("[mETHYLotest] ", model, ": ALL ATTEMPTS FAILED.")
+      message("[mETHYLotest] ", model, ": FAILED (Fallbacks ", if(allow_fallback) "exhausted" else "disabled", ").")
     }
   }
 
@@ -858,8 +911,8 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
       message("[mETHYLotest] Warning: could not compute per-group means: ", e$message)
     })
 
-    # Helper: enrich a DMC dataframe with group means and status
-    enrich_dmc_df <- function(df) {
+    # Helper: enrich a DMC dataframe with group means, status, and provenance
+    enrich_dmc_df <- function(df, params_used = NULL) {
       if (is.null(df) || nrow(df) == 0) return(df)
 
       # Status column
@@ -908,11 +961,41 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
         }
       }
 
+      # Provenance columns
+      if (!is.null(params_used)) {
+        df$Prov_Model <- params_used$label
+        df$Prov_Covariates <- params_used$covariates
+        df$Prov_Overdispersion <- params_used$overdispersion
+        df$Prov_Fallback <- params_used$fallback_used
+      }
+
       df
     }
     # ============================================══════════════════
 
     any_exported <- FALSE
+    
+    # ── Generate Provenance Manifest ──
+    prov_list <- lapply(names(diff_results), function(m_name) {
+      p <- attr(diff_results[[m_name]], "params_used")
+      if (is.null(p)) return(NULL)
+      data.frame(
+        Export_Name = m_name,
+        Config_Label = p$label,
+        Covariates = p$covariates,
+        Overdispersion = p$overdispersion,
+        Test = p$test,
+        Cores = p$mc.cores,
+        Attempt = p$attempt_index,
+        Fallback = p$fallback_used,
+        Incidents = paste(p$incidents, collapse=" | "),
+        stringsAsFactors = FALSE
+      )
+    })
+    prov_df <- do.call(rbind, prov_list)
+    if (!is.null(prov_df)) {
+      write.csv(prov_df, file.path(results_dir, "model_provenance.csv"), row.names = FALSE)
+    }
 
     for (model in names(diff_results)) {
       safe   <- gsub("[^A-Za-z0-9_.-]", "_", model)
@@ -962,7 +1045,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
         any_exported <- TRUE
 
         # ── Enrich with group means and status ──
-        df_res <- enrich_dmc_df(df_res)
+        df_res <- enrich_dmc_df(df_res, attr(dm_obj, "params_used"))
 
         # CSV & optional Excel
         utils::write.csv(df_res, file.path(results_dir, paste0("DMC_", safe, ".csv")), row.names = FALSE)
@@ -1062,7 +1145,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
       }
 
       # Always export full results (all positions, no filter)
-      raw_df <- enrich_dmc_df(raw_df)
+      raw_df <- enrich_dmc_df(raw_df, attr(dm_obj, "params_used"))
       full_path_csv <- file.path(results_dir, paste0("Full_", safe, ".csv"))
       tryCatch(utils::write.csv(raw_df, full_path_csv, row.names = FALSE), error = function(e) NULL)
       if (isTRUE(cfg$export_excel)) {
@@ -1179,9 +1262,9 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
       for (model in names(scenarios)) {
         covs <- scenarios[[model]]$covariates
 
-        if (!is.null(covs) && nrow(covs) <= (2 + ncol(covs))) {
-          message("[mETHYLotest] Tiling skip ", model,
-                  ": overfitting risk.")
+        ident_check <- is_identifiable(meth@treatment, covs)
+        if (!ident_check$ok) {
+          message("[mETHYLotest] Tiling skip ", model, " : ", ident_check$reason)
           next
         }
 
@@ -1190,35 +1273,36 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
 
         # Try 1: safe_cores
         res <- safe_calcDiffMeth(tiles, covs, overdispersion,
-                                 diff_test, tiles_safe_cores)
+                                 diff_test, tiles_safe_cores, model, 1L, FALSE)
 
-        # Try 2: 1 core
-        if (is.null(res) && tiles_safe_cores > 1L) {
-          message("[mETHYLotest]   Tiling retrying with mc.cores=1...")
-          res <- safe_calcDiffMeth(tiles, covs, overdispersion,
-                                   diff_test, 1L)
+        fallback_suffix <- ""
+        if (is.null(res) && allow_fallback) {
+          if (tiles_safe_cores > 1L) {
+            message("[mETHYLotest]   Tiling retrying with mc.cores=1...")
+            res <- safe_calcDiffMeth(tiles, covs, overdispersion, diff_test, 1L, model, 2L, TRUE)
+            if (!is.null(res)) fallback_suffix <- "__FALLBACK_1core"
+          }
+          if (is.null(res)) {
+            message("[mETHYLotest]   Tiling retrying with overdispersion='none'...")
+            res <- safe_calcDiffMeth(tiles, covs, "none", "Chisq", 1L, model, 3L, TRUE)
+            if (!is.null(res)) fallback_suffix <- "__FALLBACK_no_MN"
+          }
+          if (is.null(res) && !is.null(covs)) {
+            message("[mETHYLotest]   Tiling fallback without covariates...")
+            res <- safe_calcDiffMeth(tiles, NULL, "none", "Chisq", 1L, model, 4L, TRUE)
+            if (!is.null(res)) fallback_suffix <- "__FALLBACK_no_cov"
+          }
         }
 
-        # Try 3: simplified
         if (is.null(res)) {
-          message("[mETHYLotest]   Tiling retrying with overdispersion='none'...")
-          res <- safe_calcDiffMeth(tiles, covs, "none", "Chisq", 1L)
-        }
-
-        # Try 4: without covariates
-        if (is.null(res) && !is.null(covs)) {
-          message("[mETHYLotest]   Tiling fallback without covariates...")
-          res <- safe_calcDiffMeth(tiles, NULL, "none", "Chisq", 1L)
-        }
-
-        if (is.null(res)) {
-          message("[mETHYLotest] Tiling ", model, ": ALL ATTEMPTS FAILED.")
+          message("[mETHYLotest] Tiling ", model, ": FAILED (Fallbacks ", if(allow_fallback) "exhausted" else "disabled", ").")
           next
         }
 
+        final_model_name <- paste0(model, fallback_suffix)
         dm_tiles <- res
-        tiles_results[[model]] <- dm_tiles
-        message("[mETHYLotest] Tiling ", model, ": success.")
+        tiles_results[[final_model_name]] <- dm_tiles
+        message("[mETHYLotest] Tiling ", final_model_name, ": success.")
 
         # Extract significant
         sig_tiles <- tryCatch(
@@ -1520,6 +1604,27 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
         }
         message("[mETHYLotest]   Full results: Full_tiles_", safe,
                 ".csv (", nrow(raw_tiles), " regions)")
+      }
+      # ── Generate Provenance Manifest for Tiling ──
+      prov_list_tiles <- lapply(names(tiles_results), function(m_name) {
+        p <- attr(tiles_results[[m_name]], "params_used")
+        if (is.null(p)) return(NULL)
+        data.frame(
+          Export_Name = m_name,
+          Config_Label = p$label,
+          Covariates = p$covariates,
+          Overdispersion = p$overdispersion,
+          Test = p$test,
+          Cores = p$mc.cores,
+          Attempt = p$attempt_index,
+          Fallback = p$fallback_used,
+          Incidents = paste(p$incidents, collapse=" | "),
+          stringsAsFactors = FALSE
+        )
+      })
+      prov_df_tiles <- do.call(rbind, prov_list_tiles)
+      if (!is.null(prov_df_tiles)) {
+        write.csv(prov_df_tiles, file.path(tiles_dir, "model_provenance.csv"), row.names = FALSE)
       }
 
       saveRDS(tiles_results,
