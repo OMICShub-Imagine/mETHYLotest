@@ -71,7 +71,7 @@ mETHYLotest.NGS.Validate.UI <- function(validation_results) {
         shinydashboard::menuItem("Heatmap",
                                  tabName = "tab_heatmap",
                                  icon = icon("border-all")),
-        shinydashboard::menuItem("SVM Performance",
+        shinydashboard::menuItem("SVM (Descriptive) ⚠️",
                                  tabName = "tab_svm",
                                  icon = icon("chart-line")),
         shinydashboard::menuItem("Top Contributors",
@@ -165,8 +165,9 @@ mETHYLotest.NGS.Validate.UI <- function(validation_results) {
           tabName = "tab_svm",
           fluidRow(
             shinydashboard::box(
-              title = "SVM Classification Performance",
-              status = "success", solidHeader = TRUE, width = 12,
+              title = "SVM Classification (Descriptive Fit on All Samples ⚠️)",
+              status = "warning", solidHeader = TRUE, width = 12,
+              p("WARNING: This model was trained on features selected from the same dataset. The accuracy shown is a descriptive fit and should NOT be interpreted as predictive accuracy on unseen data due to high risk of data leakage.", style = "color: #e67e22; font-weight: bold; margin-bottom: 15px;"),
               uiOutput("svm_performance_ui")
             )
           )

@@ -220,7 +220,11 @@ mETHYLotest.NGS.validate <- function(meth,
     ml_df_raw       <- data.frame(dat)
     ml_df_raw$Class <- pheno_fac
 
-    # ── 4a. SVM ──
+    # ── 4a. SVM (Descriptive - High Risk of Data Leakage) ──
+    message("[Validation] WARNING: Training SVM on features selected from the same dataset.")
+    message("[Validation] WARNING: This is a circular validation (data leakage).")
+    message("[Validation] WARNING: Results should be interpreted as Descriptive Fit, not Predictive Accuracy.")
+
     ctrl <- caret::trainControl(
       method          = train_method,
       number          = train_number,

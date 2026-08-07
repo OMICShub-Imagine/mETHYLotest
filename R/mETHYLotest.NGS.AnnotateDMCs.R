@@ -16,11 +16,9 @@
 #' @importFrom methylKit getMethylDiff
 #' @importFrom writexl write_xlsx
 #' @importFrom ggplot2 ggsave
-mETHYLotest.NGS.AnnotateDMCs <- function(diff_obj,
+mETHYLotest.NGS.AnnotateDMCs <- function(enriched_dfs,
                                             assembly,
                                             output_dir,
-                                            diff_cutoff = 25,
-                                            qval_cutoff = 0.05,
                                             export_excel = FALSE) {
 
   message("\n=== Starting Genomic Annotation ===")
@@ -28,19 +26,12 @@ mETHYLotest.NGS.AnnotateDMCs <- function(diff_obj,
   if (!requireNamespace("annotatr", quietly = TRUE)) {
     stop("Package 'annotatr' is required. Install via BiocManager::install('annotatr')")
   }
-  if (!requireNamespace("methylKit", quietly = TRUE)) stop("Package 'methylKit' is required.")
   if (!requireNamespace("writexl", quietly = TRUE)) stop("Package 'writexl' is required.")
 
   if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
-  # Input Standardization
-  diff_list <- list()
-  if (inherits(diff_obj, "methylDiff")) {
-    diff_list[["Annotated_DMCs"]] <- diff_obj
-  } else if (is.list(diff_obj)) {
-    diff_list <- diff_obj
-  } else {
-    stop("Error: 'diff_obj' must be a 'methylDiff' object or a list of 'methylDiff' objects.")
+  if (!is.list(enriched_dfs) || length(enriched_dfs) == 0) {
+    stop("Error: 'enriched_dfs' must be a non-empty list of dataframes.")
   }
 
   # Assembly Mapping
@@ -72,21 +63,31 @@ mETHYLotest.NGS.AnnotateDMCs <- function(diff_obj,
   annotated_results <- list()
 
   # Annotation Loop
-  for (model_name in names(diff_list)) {
+  for (model_name in names(enriched_dfs)) {
 
     safe_name <- gsub("[ ()/]", "_", model_name)
     message(paste("\n-> Processing:", model_name))
 
-    sig_diff_obj <- methylKit::getMethylDiff(diff_list[[model_name]],
-                                             difference = diff_cutoff,
-                                             qvalue = qval_cutoff)
+    df_res <- enriched_dfs[[model_name]]
 
-    if (nrow(sig_diff_obj) == 0) {
+    if (is.null(df_res) || nrow(df_res) == 0) {
       message("   No significant DMCs found. Skipping.")
       next
     }
+    
+    # Rename chr to seqnames for GRanges compatibility
+    if ("chr" %in% colnames(df_res)) {
+      colnames(df_res)[colnames(df_res) == "chr"] <- "seqnames"
+    }
 
-    dmc_gr <- as(sig_diff_obj, "GRanges")
+    dmc_gr <- tryCatch({
+      GenomicRanges::makeGRangesFromDataFrame(df_res, keep.extra.columns = TRUE)
+    }, error = function(e) {
+      message("   Warning: Could not create GRanges object: ", e$message)
+      NULL
+    })
+    
+    if (is.null(dmc_gr)) next
 
     message("   Mapping DMCs to genomic features...")
     dmc_annotated <- annotatr::annotate_regions(
@@ -135,7 +136,17 @@ mETHYLotest.NGS.AnnotateDMCs <- function(diff_obj,
           cpg_summary  <- as.data.frame(table(cpg_types), stringsAsFactors = FALSE)
           colnames(gene_summary) <- c("feature", "count")
           colnames(cpg_summary)  <- c("feature", "count")
-          jsonlite::write_json(list(genes = gene_summary, cpgs = cpg_summary), file.path(output_dir, paste0("annotation_summary_", safe_name, ".json")), auto_unbox = TRUE)
+          
+          # T7: Calculate unique/deduplicated DMC count
+          n_unique_dmcs <- nrow(unique(df_annotated[, c("seqnames", "start", "end", "strand")]))
+          
+          jsonlite::write_json(list(
+            genes = gene_summary, 
+            cpgs = cpg_summary,
+            unique_dmcs = n_unique_dmcs
+          ), file.path(output_dir, paste0("annotation_summary_", safe_name, ".json")), auto_unbox = TRUE)
+          
+          message("   -> Annotated ", nrow(df_annotated), " features across ", n_unique_dmcs, " unique DMCs.")
         }
       }, silent = TRUE)
     }, error = function(e) {

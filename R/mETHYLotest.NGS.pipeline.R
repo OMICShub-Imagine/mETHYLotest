@@ -203,10 +203,25 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
   interim_dir <- rds_dir
   output_rds <- file.path(rds_dir, "myobj_raw.rds")
 
+  myobj <- NULL
   if (file.exists(output_rds)) {
     message("[mETHYLotest] Loading existing raw object: ", output_rds)
-    myobj <- readRDS(output_rds)
-  } else {
+    myobj_cache <- readRDS(output_rds)
+    
+    # ── Cache Invalidation Check ──
+    cached_ids <- methylKit::getSampleID(myobj_cache)
+    cached_treat <- as.vector(as.numeric(methylKit::getTreatment(myobj_cache)))
+    
+    if (!identical(as.character(cached_ids), as.character(SampleIds)) || 
+        !identical(cached_treat, SampleTreatment)) {
+      message("[mETHYLotest] WARNING: Cache invalid (Sample IDs or Treatment changed). Re-importing...")
+      myobj <- NULL
+    } else {
+      myobj <- myobj_cache
+    }
+  } 
+  
+  if (is.null(myobj)) {
     message("[mETHYLotest] Importing from raw files...")
 
     # UI writes string "NA", methylKit expects R NA
@@ -574,42 +589,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
   }
   .end_step()
 
-  # ========================================================================
-  # 3b. COVERAGE NORMALIZATION (optional)
-  # ========================================================================
 
-  if (isTRUE(cfg$do_normalize_coverage)) {
-    message("[mETHYLotest] === Coverage Normalization ===")
-    .start_step("Coverage_Normalization")
-
-    norm_method <- if (!is.null(cfg$normalize_cov_method))
-      cfg$normalize_cov_method else "median"
-
-    message("[mETHYLotest] Method: ", norm_method)
-    message("[mETHYLotest] Samples before: ", length(filtered.myobj))
-
-    # Log coverage stats before
-    cov_before <- vapply(filtered.myobj, function(s) {
-      median(methylKit::getData(s)$coverage)
-    }, numeric(1))
-    message("[mETHYLotest] Median coverage per sample (before): ",
-            paste(round(cov_before, 1), collapse = ", "))
-
-    filtered.myobj <- methylKit::normalizeCoverage(
-      filtered.myobj,
-      method = norm_method)
-
-    # Log coverage stats after
-    cov_after <- vapply(filtered.myobj, function(s) {
-      median(methylKit::getData(s)$coverage)
-    }, numeric(1))
-    message("[mETHYLotest] Median coverage per sample (after):  ",
-            paste(round(cov_after, 1), collapse = ", "))
-
-    .end_step()
-  } else {
-    message("[mETHYLotest] Coverage normalization skipped.")
-  }
 
 
 
@@ -739,7 +719,10 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
       covariates = cbind(df_batch, df_covs),
       desc = "Batch + Covariates")
 
+  primary_model_name <- if (!is.null(cfg$primary_model)) cfg$primary_model else tail(names(scenarios), 1)
+  
   message("[mETHYLotest] ", length(scenarios), " scenario(s).")
+  message("[mETHYLotest] Primary Model designated as: ", primary_model_name)
 
   overdispersion <- if (!is.null(cfg$diff_overdispersion))
     cfg$diff_overdispersion else "MN"
@@ -979,8 +962,14 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
     prov_list <- lapply(names(diff_results), function(m_name) {
       p <- attr(diff_results[[m_name]], "params_used")
       if (is.null(p)) return(NULL)
+      
+      is_primary <- startsWith(m_name, primary_model_name)
+      export_prefix <- if (is_primary) "" else "Sensitivity_"
+      safe_export <- paste0(export_prefix, gsub("[^A-Za-z0-9_.-]", "_", m_name))
+      
       data.frame(
-        Export_Name = m_name,
+        Export_Name = safe_export,
+        Model_Role = if (is_primary) "Primary" else "Sensitivity",
         Config_Label = p$label,
         Covariates = p$covariates,
         Overdispersion = p$overdispersion,
@@ -996,9 +985,13 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
     if (!is.null(prov_df)) {
       write.csv(prov_df, file.path(results_dir, "model_provenance.csv"), row.names = FALSE)
     }
+    
+    enriched_dmcs_list <- list()
 
     for (model in names(diff_results)) {
-      safe   <- gsub("[^A-Za-z0-9_.-]", "_", model)
+      is_primary <- startsWith(model, primary_model_name)
+      export_prefix <- if (is_primary) "" else "Sensitivity_"
+      safe   <- paste0(export_prefix, gsub("[^A-Za-z0-9_.-]", "_", model))
       dm_obj <- diff_results[[model]]
 
       # Diagnostic: check raw data first
@@ -1046,6 +1039,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
 
         # ── Enrich with group means and status ──
         df_res <- enrich_dmc_df(df_res, attr(dm_obj, "params_used"))
+        enriched_dmcs_list[[model]] <- df_res
 
         # CSV & optional Excel
         utils::write.csv(df_res, file.path(results_dir, paste0("DMC_", safe, ".csv")), row.names = FALSE)
@@ -1221,7 +1215,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
 
     win_size  <- if (!is.null(cfg$tiling_win_size)) cfg$tiling_win_size else 1000L
     step_size <- if (!is.null(cfg$tiling_step_size)) cfg$tiling_step_size else 1000L
-    min_cov   <- if (!is.null(cfg$tiling_min_cov)) cfg$tiling_min_cov else 3L
+    min_cov   <- if (!is.null(cfg$tiling_min_cov)) cfg$tiling_min_cov else 10L
 
     message("[mETHYLotest] Window: ", win_size, "bp | Step: ",
             step_size, "bp | Min CpGs: ", min_cov)
@@ -1318,8 +1312,9 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
                 ": ", nrow(dm_tiles), " regions, ",
                 n_sig, " DMRs")
 
-        safe <- gsub("[^A-Za-z0-9_.-]", "_", model)
-
+        is_primary <- startsWith(final_model_name, primary_model_name)
+        export_prefix <- if (is_primary) "" else "Sensitivity_"
+        safe <- paste0(export_prefix, gsub("[^A-Za-z0-9_.-]", "_", final_model_name))
         # ════════════════════════════════════════════════════════
         # Pre-build DMP GRanges for cross-referencing
         # ════════════════════════════════════════════════════════
@@ -1609,8 +1604,14 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
       prov_list_tiles <- lapply(names(tiles_results), function(m_name) {
         p <- attr(tiles_results[[m_name]], "params_used")
         if (is.null(p)) return(NULL)
+        
+        is_primary <- startsWith(m_name, primary_model_name)
+        export_prefix <- if (is_primary) "" else "Sensitivity_"
+        safe_export <- paste0(export_prefix, gsub("[^A-Za-z0-9_.-]", "_", m_name))
+        
         data.frame(
-          Export_Name = m_name,
+          Export_Name = safe_export,
+          Model_Role = if (is_primary) "Primary" else "Sensitivity",
           Config_Label = p$label,
           Covariates = p$covariates,
           Overdispersion = p$overdispersion,
@@ -1875,18 +1876,11 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
 
   .start_step("Annotation")
 
-  annot_diff <- if (!is.null(cfg$annot_diff_cutoff))
-    cfg$annot_diff_cutoff else 25
-  annot_qval <- if (!is.null(cfg$annot_qval_cutoff))
-    cfg$annot_qval_cutoff else 0.05
-
   annotated_data <- tryCatch({
     mETHYLotest.NGS.AnnotateDMCs(
-      diff_obj     = diff_results,
+      enriched_dfs = enriched_dmcs_list,
       assembly     = cfg$assembly,
       output_dir   = file.path(res_dir, "Annotation"),
-      diff_cutoff  = annot_diff,
-      qval_cutoff  = annot_qval,
       export_excel = isTRUE(cfg$export_excel))
   }, error = function(e) {
     warning("[mETHYLotest] Annotation failed: ", e$message,

@@ -235,10 +235,12 @@ mETHYLotest.NGS.Check_ProjectSettings <- function(params_file = NULL) {
     errors <- c(errors, "Pipeline not defined.")
   }
 
-  if (!is.null(cfg$min_coverage) && cfg$min_coverage >= 0)
+  if (!is.null(cfg$min_coverage) && cfg$min_coverage >= 10)
     message("[mETHYLotest Check] OK  Min coverage: ", cfg$min_coverage)
-  else
-    warnings <- c(warnings, "min_coverage invalid. Default: 1.")
+  else {
+    message("[mETHYLotest Check] OK  Min coverage: ", if(!is.null(cfg$min_coverage)) cfg$min_coverage else 1)
+    warnings <- c(warnings, "min_coverage < 10 is not recommended for NGS. Suggested Default: 10.")
+  }
 
   valid_res <- c("base", "region")
   if (!is.null(cfg$resolution) && cfg$resolution %in% valid_res)
@@ -261,8 +263,12 @@ mETHYLotest.NGS.Check_ProjectSettings <- function(params_file = NULL) {
         "qc_hi_perc=", cfg$qc_hi_perc, " outside [90,100]."))
   }
 
-  if (!is.null(cfg$qc_lo_count) && cfg$qc_lo_count >= 0)
+  if (!is.null(cfg$qc_lo_count) && cfg$qc_lo_count >= 10)
     message("[mETHYLotest Check] OK  lo.count: ", cfg$qc_lo_count)
+  else if (!is.null(cfg$qc_lo_count)) {
+    message("[mETHYLotest Check] OK  lo.count: ", cfg$qc_lo_count)
+    warnings <- c(warnings, "qc_lo_count < 10 is not recommended for NGS. Suggested Default: 10.")
+  }
 
   # ========================================================================
   # 6. ANALYSIS PARAMETERS
