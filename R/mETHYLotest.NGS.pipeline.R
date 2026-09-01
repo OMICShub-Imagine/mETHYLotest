@@ -607,6 +607,14 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
   if (length(filtered.myobj) < 2L)
     stop("[mETHYLotest] < 2 samples remaining.")
 
+  # Coverage Normalization (optional)
+  if (isTRUE(cfg$do_normalize_coverage)) {
+    norm_method <- if (!is.null(cfg$normalize_cov_method)) cfg$normalize_cov_method else "median"
+    message("[mETHYLotest] Normalizing coverage (method=", norm_method, ")...")
+    message("[mETHYLotest] WARNING: Normalization produces fractional counts which violate Beta-Binomial assumptions.")
+    filtered.myobj <- methylKit::normalizeCoverage(filtered.myobj, method = norm_method)
+  }
+
   destrand_val <- isTRUE(cfg$unite_destrand)
   message("[mETHYLotest] Unite (destrand=", destrand_val, ")...")
 
