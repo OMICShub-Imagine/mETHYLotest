@@ -223,6 +223,12 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
 
   message("[Episignatures] Merging datasets...")
 
+  # Ensure myLoad has EPICv2 suffixes stripped if it's a single EPICv2 plate (bypassed HarmonizeArrays)
+  if (any(grepl("_", rownames(myLoad$beta)[1:100]))) {
+    message("[Episignatures] EPICv2 suffixes detected. Harmonizing probe names with EPICv1 controls...")
+    myLoad <- .epicv2_strip_suffixes(myLoad, duplicate_strategy = "mean")
+  }
+
   common_probes <- intersect(
     rownames(myLoad$beta),
     rownames(myLoad_ctl$beta)
