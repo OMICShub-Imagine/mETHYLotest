@@ -58,21 +58,22 @@ mf_format_bytes <- function(bytes) {
     }
 
   } else {  # "mean"
-    idx_by_probe <- split(seq_along(clean_names), clean_names)
-    unique_names <- names(idx_by_probe)
-    function(mat) {
-      out <- matrix(
-        NA_real_,
-        nrow     = length(idx_by_probe),
-        ncol     = ncol(mat),
-        dimnames = list(unique_names, colnames(mat))
-      )
-      for (g in unique_names) {
-        idx      <- idx_by_probe[[g]]
-        out[g, ] <- if (length(idx) == 1L) mat[idx, ]
-        else colMeans(mat[idx, , drop = FALSE], na.rm = TRUE)
+    if (requireNamespace("limma", quietly = TRUE)) {
+      function(mat) {
+        limma::avereps(mat, ID = clean_names)
       }
-      out
+    } else {
+      # Fallback to base R aggregate if limma is missing (slower)
+      function(mat) {
+        # rowsum is much faster than a loop, but requires no NAs for division. 
+        # Using a fast by() or aggregate() approach.
+        out <- aggregate(mat, by = list(ID = clean_names), FUN = mean, na.rm = TRUE)
+        rn <- out$ID
+        out$ID <- NULL
+        out_mat <- as.matrix(out)
+        rownames(out_mat) <- rn
+        out_mat
+      }
     }
   }
 }

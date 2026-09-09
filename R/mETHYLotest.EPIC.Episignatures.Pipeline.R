@@ -232,7 +232,7 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
 
     myLoad_ctl <- ChAMP::champ.load(
       directory = ctl_dir, arraytype = "EPICv1",
-      method = if (!is.null(cfg$load_method)) cfg$load_method else "ChAMP"
+      method = "ChAMP"
     )
 
     message(
