@@ -447,11 +447,11 @@ adjustment.
 | Category | Key Parameters |
 |---|---|
 | **Unite** | `destrand` (TRUE for CpG) |
-| **Coverage Normalization** | Method: median / mean (optional) |
+| **Coverage Normalization** | Method: median / mean (optional; *WARNING: disabling recommended to avoid fractional reads*) |
 | **Clustering** | Distance: correlation / euclidean; Method: ward / complete |
 | **Tiling** | Window/step size, min CpGs (optional) |
 | **Segmentation** | HMM states, min segment length (optional) |
-| **DiffMeth** | Overdispersion: MN; Test: Chisq; Cutoff: 10%; Q-value: 0.05 |
+| **DiffMeth** | Overdispersion: MN (strict default); Test: Chisq; Cutoff: 10%; Q-value: 0.05 |
 | **Annotation** | Diff cutoff synced with DiffMeth; Q-value: 0.05 |
 
 ![Analysis Options](../img/mETHYLotest.NGS.ProjectUI.AnalysisOptions_1.png){width=100%}
@@ -496,7 +496,7 @@ original samples** (never lost even when samples are excluded).
 ```
 repeat {
   1. Coverage filters (lo.count, hi.perc)
-  2. Chromosome filtering
+  2. Chromosome filtering (Quick button: **"Keep Canonical Only"** to auto-select chr1-22, X, Y)
   3. Sample exclusion (manual + auto-empty)
   4. QC metrics + control assessment
   5. Interactive QC UI
