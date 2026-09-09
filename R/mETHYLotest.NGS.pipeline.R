@@ -1183,6 +1183,8 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
           p_volc <- ggplot2::ggplot(plot_df, ggplot2::aes(x = meth.diff, y = logQ, color = status)) +
             ggplot2::geom_point(alpha = 0.6) +
             ggplot2::scale_color_manual(values = c("Hyper" = "red", "Hypo" = "blue", "Unchanged" = "gray")) +
+            ggplot2::geom_vline(xintercept = c(-diff_cutoff, diff_cutoff), linetype = "dashed", color = "grey40") +
+            ggplot2::geom_hline(yintercept = -log10(diff_qvalue), linetype = "dashed", color = "grey40") +
             ggplot2::theme_minimal() +
             ggplot2::labs(title = paste("Volcano Plot:", safe), x = "Diff Meth (%)", y = "-log10(Q-value)")
           ggplot2::ggsave(file.path(results_dir, paste0("Volcano_", safe, ".png")), plot = p_volc, width = 8, height = 6)
@@ -1621,6 +1623,33 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
         }
         message("[mETHYLotest]   Full results: Full_tiles_", safe,
                 ".csv (", nrow(raw_tiles), " regions)")
+
+        # Generate Volcano Plot for DMRs
+        tryCatch({
+          if (all(c("meth.diff", "qvalue", "Status") %in% colnames(raw_tiles))) {
+            plot_df <- raw_tiles
+            # Re-assign status clearly for the plot based on cutoffs
+            plot_df$Status <- "Unchanged"
+            plot_df$Status[plot_df$meth.diff > 0 & plot_df$qvalue < diff_qvalue & abs(plot_df$meth.diff) >= diff_cutoff] <- "Hyper"
+            plot_df$Status[plot_df$meth.diff < 0 & plot_df$qvalue < diff_qvalue & abs(plot_df$meth.diff) >= diff_cutoff] <- "Hypo"
+            plot_df$qvalue[plot_df$qvalue == 0] <- 1e-300
+            plot_df$logQ <- -log10(plot_df$qvalue)
+
+            p_volc <- ggplot2::ggplot(plot_df, ggplot2::aes(x = meth.diff, y = logQ, color = Status)) +
+              ggplot2::geom_point(alpha = 0.6) +
+              ggplot2::scale_color_manual(values = c("Hyper" = "red", "Hypo" = "blue", "Unchanged" = "gray")) +
+              ggplot2::geom_vline(xintercept = c(-diff_cutoff, diff_cutoff), linetype = "dashed", color = "grey40") +
+              ggplot2::geom_hline(yintercept = -log10(diff_qvalue), linetype = "dashed", color = "grey40") +
+              ggplot2::theme_minimal() +
+              ggplot2::labs(title = paste("DMR Volcano Plot:", safe), x = "Diff Meth (%)", y = "-log10(Q-value)")
+            ggplot2::ggsave(file.path(tiles_dir, paste0("Volcano_tiles_", safe, ".png")), plot = p_volc, width = 8, height = 6)
+            try({
+              volc_json_df <- plot_df[, intersect(colnames(plot_df), c("chr", "start", "end", "meth.diff", "qvalue", "Status", "logQ"))]
+              jsonlite::write_json(volc_json_df, file.path(tiles_dir, paste0("volcano_tiles_data_", safe, ".json")))
+            }, silent = TRUE)
+          }
+        }, error = function(e) warning("[mETHYLotest] Failed to generate DMR Volcano plot: ", e$message))
+
       }
       # ── Generate Provenance Manifest for Tiling ──
       prov_list_tiles <- lapply(names(tiles_results), function(m_name) {

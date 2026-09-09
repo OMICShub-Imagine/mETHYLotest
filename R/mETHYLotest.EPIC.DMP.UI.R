@@ -449,7 +449,18 @@ mETHYLotest.EPIC.DMP.UI <- function(dmp_results,
           xaxis  = list(title = "Delta Beta",
                         zeroline = TRUE,
                         zerolinecolor = "#aaa"),
-          yaxis  = list(title = "-log10 Adj. P-value")
+          yaxis  = list(title = "-log10 Adj. P-value"),
+          shapes = list(
+            list(type = "line", x0 = 0, x1 = 1, xref = "paper", 
+                 y0 = -log10(input$adjPval_cutoff), y1 = -log10(input$adjPval_cutoff), yref = "y", 
+                 line = list(color = "grey", dash = "dash")),
+            list(type = "line", x0 = -input$logFC_cutoff, x1 = -input$logFC_cutoff, xref = "x", 
+                 y0 = 0, y1 = 1, yref = "paper", 
+                 line = list(color = "grey", dash = "dash")),
+            list(type = "line", x0 = input$logFC_cutoff, x1 = input$logFC_cutoff, xref = "x", 
+                 y0 = 0, y1 = 1, yref = "paper", 
+                 line = list(color = "grey", dash = "dash"))
+          )
         )
     })
 

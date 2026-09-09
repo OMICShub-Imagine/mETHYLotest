@@ -888,14 +888,17 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
       tryCatch({
         df_volc <- myDMP[[comp]]
         if (all(c("logFC", "adj.P.Val") %in% colnames(df_volc))) {
+          dmp_q <- if (!is.null(cfg$dmp_adj_p_val)) cfg$dmp_adj_p_val else 0.05
           df_volc$status <- "Unchanged"
-          df_volc$status[df_volc$logFC > 0 & df_volc$adj.P.Val < 0.05] <- "Hyper"
-          df_volc$status[df_volc$logFC < 0 & df_volc$adj.P.Val < 0.05] <- "Hypo"
+          df_volc$status[df_volc$logFC > 0 & df_volc$adj.P.Val < dmp_q] <- "Hyper"
+          df_volc$status[df_volc$logFC < 0 & df_volc$adj.P.Val < dmp_q] <- "Hypo"
           df_volc$logQ <- -log10(df_volc$adj.P.Val)
           
           p_volc <- ggplot2::ggplot(df_volc, ggplot2::aes(x = logFC, y = logQ, color = status)) +
             ggplot2::geom_point(alpha = 0.6) +
             ggplot2::scale_color_manual(values = c("Hyper" = "red", "Hypo" = "blue", "Unchanged" = "gray")) +
+            ggplot2::geom_hline(yintercept = -log10(dmp_q), linetype = "dashed", color = "grey40") +
+            ggplot2::geom_vline(xintercept = 0, linetype = "solid", color = "grey80", size = 0.5) +
             ggplot2::theme_minimal() +
             ggplot2::labs(title = paste("Volcano Plot:", comp), x = "logFC", y = "-log10(adj.P.Val)")
           ggplot2::ggsave(file.path(dmp_dir, paste0("Volcano_", safe, ".png")), plot = p_volc, width = 8, height = 6)
