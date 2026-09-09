@@ -196,60 +196,81 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
   }
 
   # ========================================================================
-  # 5. LOAD INTERNAL CONTROLS
+  # 5. LOAD CONTROLS & MERGE DATASETS
   # ========================================================================
 
-  message("[Episignatures] Loading internal controls...")
+  ctrl_group_name <- cfg$compare_group[1]
+  user_has_controls <- any(myLoad$pd[[col_group]] == ctrl_group_name)
 
-  ctl_dir <- system.file("extdata", "idats_ctl", package = "mETHYLotest")
-  if (!nzchar(ctl_dir)) {
-    stop("[Episignatures] Control IDATs not found in package.")
+  if (user_has_controls) {
+    message("[Episignatures] ========================================")
+    message("[Episignatures] User provided their own control group ('", ctrl_group_name, "').")
+    message("[Episignatures] Bypassing internal package controls.")
+    message("[Episignatures] ========================================")
+
+    # Ensure myLoad has EPICv2 suffixes stripped if it's a single EPICv2 plate (bypassed HarmonizeArrays)
+    if (any(grepl("_", rownames(myLoad$beta)[1:100]))) {
+      message("[Episignatures] EPICv2 suffixes detected in user data. Stripping suffixes...")
+      myLoad <- .epicv2_strip_suffixes(myLoad, duplicate_strategy = "mean")
+    }
+
+    beta_combined <- myLoad$beta
+    control_samples <- myLoad$pd[["Sample_Name"]][myLoad$pd[[col_group]] == ctrl_group_name]
+    test_samples <- setdiff(colnames(beta_combined), c(control_samples, duplicated_samples))
+
+    message(
+      "[Episignatures] Test: ", length(test_samples),
+      " | Controls: ", length(control_samples)
+    )
+  } else {
+    message("[Episignatures] Loading internal controls...")
+
+    ctl_dir <- system.file("extdata", "idats_ctl", package = "mETHYLotest")
+    if (!nzchar(ctl_dir)) {
+      stop("[Episignatures] Control IDATs not found in package.")
+    }
+
+    myLoad_ctl <- ChAMP::champ.load(
+      directory = ctl_dir, arraytype = "EPICv1",
+      method = if (!is.null(cfg$load_method)) cfg$load_method else "ChAMP"
+    )
+
+    message(
+      "[Episignatures] Controls: ",
+      ncol(myLoad_ctl$beta), " samples, ",
+      nrow(myLoad_ctl$beta), " CpGs"
+    )
+
+    message("[Episignatures] Merging datasets...")
+
+    # Ensure myLoad has EPICv2 suffixes stripped if it's a single EPICv2 plate
+    if (any(grepl("_", rownames(myLoad$beta)[1:100]))) {
+      message("[Episignatures] EPICv2 suffixes detected. Harmonizing probe names with EPICv1 controls...")
+      myLoad <- .epicv2_strip_suffixes(myLoad, duplicate_strategy = "mean")
+    }
+
+    common_probes <- intersect(
+      rownames(myLoad$beta),
+      rownames(myLoad_ctl$beta)
+    )
+    message(
+      "[Episignatures] Common probes: ",
+      format(length(common_probes), big.mark = ",")
+    )
+
+    beta_combined <- cbind(
+      myLoad$beta[common_probes, , drop = FALSE],
+      myLoad_ctl$beta[common_probes, , drop = FALSE]
+    )
+
+    control_samples <- colnames(myLoad_ctl$beta)
+    test_samples <- setdiff(colnames(myLoad$beta), duplicated_samples)
+
+    message(
+      "[Episignatures] Test: ", length(test_samples),
+      " | Controls: ", length(control_samples)
+    )
   }
-
-  myLoad_ctl <- ChAMP::champ.load(
-    directory = ctl_dir, arraytype = "EPICv1",
-    method = if (!is.null(cfg$load_method)) cfg$load_method else "ChAMP"
-  )
-
-  message(
-    "[Episignatures] Controls: ",
-    ncol(myLoad_ctl$beta), " samples, ",
-    nrow(myLoad_ctl$beta), " CpGs"
-  )
-
-  # ========================================================================
-  # 6. MERGE TEST + CONTROLS
-  # ========================================================================
-
-  message("[Episignatures] Merging datasets...")
-
-  # Ensure myLoad has EPICv2 suffixes stripped if it's a single EPICv2 plate (bypassed HarmonizeArrays)
-  if (any(grepl("_", rownames(myLoad$beta)[1:100]))) {
-    message("[Episignatures] EPICv2 suffixes detected. Harmonizing probe names with EPICv1 controls...")
-    myLoad <- .epicv2_strip_suffixes(myLoad, duplicate_strategy = "mean")
-  }
-
-  common_probes <- intersect(
-    rownames(myLoad$beta),
-    rownames(myLoad_ctl$beta)
-  )
-  message(
-    "[Episignatures] Common probes: ",
-    format(length(common_probes), big.mark = ",")
-  )
-
-  beta_combined <- cbind(
-    myLoad$beta[common_probes, , drop = FALSE],
-    myLoad_ctl$beta[common_probes, , drop = FALSE]
-  )
-
-  control_samples <- colnames(myLoad_ctl$beta)
-  test_samples <- setdiff(colnames(myLoad$beta), duplicated_samples)
-
-  message(
-    "[Episignatures] Test: ", length(test_samples),
-    " | Controls: ", length(control_samples)
-  )
 
   # ========================================================================
   # 6b. PRE-PROCESSING (NORMALIZATION & BATCH CORRECTION)
@@ -270,38 +291,38 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
 
   # 2. Batch Correction (ComBat)
   if (isTRUE(cfg$perform_batch_correction)) {
-    message("[Episignatures] Batch correction requested...")
-
-    ctrl_group_name <- cfg$compare_group[1]
-
-    # Check if user has controls to prevent confounding
-    if (any(Pheno[[col_group]] == ctrl_group_name)) {
-      message("[Episignatures] Valid control group '", ctrl_group_name, "' found in user cohort. Applying ComBat...")
-
-      # Build combined phenodata
-      user_groups <- myLoad$pd[[col_group]]
-      internal_groups <- rep(ctrl_group_name, length(control_samples))
-
-      pd_combined <- data.frame(
-        Sample_Name = c(colnames(myLoad$beta), control_samples),
-        Sample_Group = c(user_groups, internal_groups),
-        Batch = c(rep("User_Lab", ncol(myLoad$beta)), rep("Internal_Pkg", length(control_samples))),
-        stringsAsFactors = FALSE
-      )
-      rownames(pd_combined) <- pd_combined$Sample_Name
-
-      # Run ComBat protecting the Sample_Group biological variation
-      combat_res <- ChAMP::champ.runCombat(
-        beta = beta_combined,
-        pd = pd_combined,
-        variablename = "Sample_Group",
-        batchname = c("Batch"),
-        logitTrans = TRUE
-      )
-
-      beta_combined <- combat_res
+    if (user_has_controls) {
+      message("[Episignatures] Batch correction requested on user's dataset...")
+      
+      batch_vars <- cfg$combat_vars
+      bio_var <- cfg$combat_bio_var
+      
+      if (is.null(batch_vars) || length(batch_vars) == 0) {
+        warning("[Episignatures] No batch variables (combat_vars) defined in config. Skipping ComBat.")
+      } else {
+        pd_combined <- myLoad$pd
+        for (bv in batch_vars) {
+          # Ensure batch variable has >1 valid level
+          if (length(unique(na.omit(pd_combined[[bv]]))) > 1) {
+            message("[Episignatures] Running ComBat for batch: ", bv)
+            tryCatch({
+              beta_combined <- ChAMP::champ.runCombat(
+                beta = beta_combined,
+                pd = pd_combined,
+                variablename = bio_var,
+                batchname = bv,
+                logitTrans = isTRUE(cfg$combat_logit_transform)
+              )
+            }, error = function(e) {
+              warning("[Episignatures] ComBat failed for batch '", bv, "': ", e$message)
+            })
+          } else {
+             message("[Episignatures] Skipping batch '", bv, "': only 1 level found.")
+          }
+        }
+      }
     } else {
-      warning(sprintf("[Episignatures] WARNING: Batch correction requested, but no control group '%s' found in user cohort! ComBat would erase the disease signature (perfect confounding). Skipping ComBat.", ctrl_group_name))
+      warning(sprintf("[Episignatures] WARNING: Batch correction requested, but no control group '%s' found in user cohort! ComBat would erase the disease signature (perfect confounding between User_Lab and Internal_Pkg). Skipping ComBat.", ctrl_group_name))
     }
   }
 
