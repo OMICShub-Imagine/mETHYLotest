@@ -170,7 +170,8 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
       write_champ_pheno(pheno_sub)
 
       loads_list[[pv]] <- ChAMP::champ.load(
-        directory = idat_dir, arraytype = champ_at, method = "ChAMP"
+        directory = idat_dir, arraytype = champ_at,
+        method = if (!is.null(cfg$load_method)) cfg$load_method else "ChAMP"
       )
 
       message(
@@ -206,7 +207,8 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
   }
 
   myLoad_ctl <- ChAMP::champ.load(
-    directory = ctl_dir, arraytype = "EPICv1", method = "ChAMP"
+    directory = ctl_dir, arraytype = "EPICv1",
+    method = if (!is.null(cfg$load_method)) cfg$load_method else "ChAMP"
   )
 
   message(
