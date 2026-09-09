@@ -407,7 +407,9 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
     if (length(kept_chrs) < length(all_chrs)) {
       filtered <- lapply(temp_obj, function(s) {
         d <- methylKit::getData(s)
-        s[d$chr %in% kept_chrs, ]
+        sub_s <- s[d$chr %in% kept_chrs, ]
+        if (is.factor(sub_s$chr)) sub_s$chr <- as.character(sub_s$chr)
+        sub_s
       })
       temp_obj <- new("methylRawList", filtered,
                       treatment = temp_obj@treatment)
@@ -517,6 +519,18 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
       sample_treatments = active_treatments)
 
     if (ui_res$action == "proceed") {
+
+      # Apply final chromosome filter if user changed it before clicking proceed
+      if (!is.null(ui_res$chrs_to_keep) && length(ui_res$chrs_to_keep) < length(all_chrs)) {
+        kept_chrs <- ui_res$chrs_to_keep
+        filtered <- lapply(temp_filt, function(s) {
+          d <- methylKit::getData(s)
+          sub_s <- s[d$chr %in% kept_chrs, ]
+          if (is.factor(sub_s$chr)) sub_s$chr <- as.character(sub_s$chr)
+          sub_s
+        })
+        temp_filt <- new("methylRawList", filtered, treatment = temp_filt@treatment)
+      }
 
       # ============================================════════════════
       # Save all interim data to data/interim/

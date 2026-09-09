@@ -335,6 +335,9 @@ mETHYLotest.NGS.QC.UI <- function(df_meth = NULL,
               hr(),
 
               h4(icon("dna"), " Chromosome Filtering"),
+              actionButton("btn_canonical_chrs", "Keep Canonical Only", 
+                           icon = icon("filter"), class = "btn-sm btn-info",
+                           style = "margin-bottom:10px;"),
               selectInput("chrs_to_keep",
                           "Select Chromosomes to KEEP:",
                           choices = all_chrs,
@@ -694,6 +697,11 @@ mETHYLotest.NGS.QC.UI <- function(df_meth = NULL,
     # ══════════════════════════════════════════════════════════════
     # TAB 3: ACTIONS
     # ══════════════════════════════════════════════════════════════
+    
+    observeEvent(input$btn_canonical_chrs, {
+      canonical_present <- grep("^(chr)?([1-9]|1[0-9]|2[0-2]|[XYMT])$", all_chrs, value = TRUE, ignore.case = TRUE)
+      updateSelectInput(session, "chrs_to_keep", selected = canonical_present)
+    })
 
     observeEvent(input$btn_update, {
       hi_p <- if (is.na(input$new_hi_perc)) 99.9 else input$new_hi_perc

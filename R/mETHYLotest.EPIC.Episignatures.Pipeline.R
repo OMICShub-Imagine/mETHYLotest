@@ -106,48 +106,71 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
 
   message("[Episignatures] Loading test samples...")
 
-  # Handle single-sample array types by duplicating temporarily
+  myLoad_rds_path <- file.path(cfg$rds_dir, "myLoad.rds")
+  myLoad <- NULL
   duplicated_samples <- character(0)
 
-  for (pv in plate_values) {
-    idx <- which(Pheno[[col_plate]] == pv)
-    if (length(idx) == 1L) {
-      message("[Episignatures] Single sample for ", pv,
-              ". Duplicating temporarily.")
-      dup_row <- Pheno[idx, ]
-      dup_name <- paste0(dup_row[[col_name]], "_dup")
-      dup_row[[col_name]] <- dup_name
-      Pheno <- rbind(Pheno, dup_row)
-      duplicated_samples <- c(duplicated_samples, dup_name)
+  if (file.exists(myLoad_rds_path)) {
+    message("[Episignatures] Found existing myLoad.rds. Loading cached object...")
+    myLoad <- readRDS(myLoad_rds_path)
+    
+    # Validation
+    if (is.null(myLoad$beta) || is.null(myLoad$pd)) {
+      warning("[Episignatures] Invalid myLoad.rds format. Falling back to raw IDAT parsing.")
+      myLoad <- NULL
+    } else {
+      # Ensure rownames align
+      if (!"Sample_Name" %in% colnames(myLoad$pd)) {
+         myLoad$pd$Sample_Name <- rownames(myLoad$pd)
+      }
+      rownames(myLoad$pd) <- myLoad$pd[["Sample_Name"]]
     }
   }
 
-  loads_list <- list()
-  for (pv in plate_values) {
-    champ_at  <- plate_to_champ(pv)
-    pheno_sub <- Pheno[Pheno[[col_plate]] == pv, , drop = FALSE]
-    write_champ_pheno(pheno_sub)
+  if (is.null(myLoad)) {
+    message("[Episignatures] Parsing raw IDATs...")
+    
+    # Handle single-sample array types by duplicating temporarily
+    for (pv in plate_values) {
+      idx <- which(Pheno[[col_plate]] == pv)
+      if (length(idx) == 1L) {
+        message("[Episignatures] Single sample for ", pv,
+                ". Duplicating temporarily.")
+        dup_row <- Pheno[idx, ]
+        dup_name <- paste0(dup_row[[col_name]], "_dup")
+        dup_row[[col_name]] <- dup_name
+        Pheno <- rbind(Pheno, dup_row)
+        duplicated_samples <- c(duplicated_samples, dup_name)
+      }
+    }
 
-    loads_list[[pv]] <- ChAMP::champ.load(
-      directory = idat_dir, arraytype = champ_at, method = "ChAMP")
+    loads_list <- list()
+    for (pv in plate_values) {
+      champ_at  <- plate_to_champ(pv)
+      pheno_sub <- Pheno[Pheno[[col_plate]] == pv, , drop = FALSE]
+      write_champ_pheno(pheno_sub)
 
-    message("[Episignatures] ", pv, ": ",
-            nrow(loads_list[[pv]]$beta), " CpGs, ",
-            ncol(loads_list[[pv]]$beta), " samples")
+      loads_list[[pv]] <- ChAMP::champ.load(
+        directory = idat_dir, arraytype = champ_at, method = "ChAMP")
+
+      message("[Episignatures] ", pv, ": ",
+              nrow(loads_list[[pv]]$beta), " CpGs, ",
+              ncol(loads_list[[pv]]$beta), " samples")
+    }
+
+    # Harmonize
+    if (length(loads_list) == 1L) {
+      myLoad <- loads_list[[1L]]
+    } else {
+      myLoad <- mETHYLotest.utils.HarmonizeArrays(loads_list)
+    }
+
+    rownames(myLoad$pd) <- myLoad$pd[["Sample_Name"]]
+
+    # Clean temp CSV
+    csv_tmp <- file.path(idat_dir, "Pheno.csv")
+    if (file.exists(csv_tmp)) file.remove(csv_tmp)
   }
-
-  # Harmonize
-  if (length(loads_list) == 1L) {
-    myLoad <- loads_list[[1L]]
-  } else {
-    myLoad <- mETHYLotest.utils.HarmonizeArrays(loads_list)
-  }
-
-  rownames(myLoad$pd) <- myLoad$pd[["Sample_Name"]]
-
-  # Clean temp CSV
-  csv_tmp <- file.path(idat_dir, "Pheno.csv")
-  if (file.exists(csv_tmp)) file.remove(csv_tmp)
 
   # ========================================================================
   # 5. LOAD INTERNAL CONTROLS
@@ -186,6 +209,60 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
 
   message("[Episignatures] Test: ", length(test_samples),
           " | Controls: ", length(control_samples))
+
+  # ========================================================================
+  # 6b. PRE-PROCESSING (NORMALIZATION & BATCH CORRECTION)
+  # ========================================================================
+
+  # 1. Normalization (BMIQ)
+  if (isTRUE(cfg$normalize_data)) {
+    message("[Episignatures] Normalizing combined dataset (method = BMIQ)...")
+    beta_combined <- ChAMP::champ.norm(
+      beta = beta_combined,
+      method = "BMIQ",
+      arraytype = "EPICv1",
+      cores = if (!is.null(cfg$num_cores)) cfg$num_cores else 1,
+      plotBMIQ = FALSE,
+      resultsDir = episig_dir
+    )
+  }
+
+  # 2. Batch Correction (ComBat)
+  if (isTRUE(cfg$perform_batch_correction)) {
+    message("[Episignatures] Batch correction requested...")
+    
+    ctrl_group_name <- cfg$compare_group[1]
+    
+    # Check if user has controls to prevent confounding
+    if (any(Pheno[[col_group]] == ctrl_group_name)) {
+      message("[Episignatures] Valid control group '", ctrl_group_name, "' found in user cohort. Applying ComBat...")
+      
+      # Build combined phenodata
+      user_groups <- myLoad$pd[[col_group]]
+      internal_groups <- rep(ctrl_group_name, length(control_samples))
+      
+      pd_combined <- data.frame(
+        Sample_Name = c(colnames(myLoad$beta), control_samples),
+        Sample_Group = c(user_groups, internal_groups),
+        Batch = c(rep("User_Lab", ncol(myLoad$beta)), rep("Internal_Pkg", length(control_samples))),
+        stringsAsFactors = FALSE
+      )
+      rownames(pd_combined) <- pd_combined$Sample_Name
+      
+      # Run ComBat protecting the Sample_Group biological variation
+      combat_res <- ChAMP::champ.runCombat(
+        beta = beta_combined,
+        pd = pd_combined,
+        variablename = "Sample_Group",
+        batchname = c("Batch"),
+        logitTrans = TRUE
+      )
+      
+      beta_combined <- combat_res
+    } else {
+      warning(sprintf("[Episignatures] WARNING: Batch correction requested, but no control group '%s' found in user cohort! ComBat would erase the disease signature (perfect confounding). Skipping ComBat.", ctrl_group_name))
+    }
+  }
 
   # ========================================================================
   # 7. LOAD EPISIGNATURE DEFINITIONS

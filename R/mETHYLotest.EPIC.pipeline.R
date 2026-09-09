@@ -155,8 +155,27 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
   # 1. PROJECT SETUP
   # ========================================================================
 
-  if (!nzchar(project_directory) || !dir.exists(project_directory))
-    project_directory <- mETHYLotest.EPIC.ProjectUI()
+  run_pipeline <- TRUE
+
+  # Handle case where project_directory is passed as a list from UI directly
+  if (is.list(project_directory)) {
+    run_pipeline <- project_directory$run
+    project_directory <- project_directory$dir
+  }
+
+  if (!nzchar(project_directory) || !dir.exists(project_directory)) {
+    ui_res <- mETHYLotest.EPIC.ProjectUI()
+    if (is.list(ui_res)) {
+      project_directory <- ui_res$dir
+      run_pipeline <- ui_res$run
+    } else {
+      project_directory <- ui_res
+    }
+  }
+  
+  if (!nzchar(project_directory)) {
+    stop("[mETHYLotest] No project directory provided. Exiting.")
+  }
 
   config_path <- normalizePath(
     file.path(project_directory, "Results", "project_config.R"))
@@ -181,8 +200,15 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
   gsea_dir      <- file.path(res_dir, "GSEA")
   cna_dir       <- file.path(res_dir, "CNA")
 
-  for (d in c(rds_dir, qc_dir))
+  for (d in c(rds_dir, qc_dir, dmp_dir, dmr_dir, block_dir, gsea_dir, cna_dir))
     if (!dir.exists(d)) dir.create(d, recursive = TRUE)
+
+  if (!isTRUE(run_pipeline)) {
+    message("[mETHYLotest] ========================================")
+    message("[mETHYLotest] Project Setup Complete (Structure Only).")
+    message("[mETHYLotest] ========================================")
+    return(invisible(NULL))
+  }
 
   # ========================================================================
   # 2. PHENOTYPE IMPORT

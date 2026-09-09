@@ -1292,8 +1292,14 @@ mETHYLotest.EPIC.ProjectUI <- function(prefill_pheno = NULL,
         updateTextInput(session, "idat_dir", value = as.character(p))
     })
 
+    run_mode <- reactiveVal(FALSE)
+
     session$onSessionEnded(function() {
-      stopApp(returnValue = isolate(final_path()))
+      if (nzchar(isolate(final_path()))) {
+        stopApp(returnValue = list(dir = isolate(final_path()), run = isolate(run_mode())))
+      } else {
+        stopApp(returnValue = "")
+      }
     })
 
     observeEvent(input$load_check_btn, {
@@ -1516,11 +1522,16 @@ mETHYLotest.EPIC.ProjectUI <- function(prefill_pheno = NULL,
 
         fluidRow(
           column(12, align = "center", hr(),
+                 actionButton("save_setup_btn",
+                              "Generate Structure Only",
+                              icon  = icon("folder-open"),
+                              class = "btn-secondary btn-lg",
+                              style = "width:30%;margin-bottom:30px;margin-right:10px;"),
                  actionButton("save_generate_btn",
-                              "Generate EPIC Project",
+                              "Generate & Run Pipeline",
                               icon  = icon("save"),
                               class = "btn-success btn-lg",
-                              style = "width:50%;margin-bottom:30px;"))
+                              style = "width:40%;margin-bottom:30px;"))
         )
       )
     })
@@ -1539,10 +1550,11 @@ mETHYLotest.EPIC.ProjectUI <- function(prefill_pheno = NULL,
     observeEvent(input$relaunch_btn, {
       project_dir <- file.path(input$base_dir, input$project_name)
       final_path(project_dir)
-      stopApp(project_dir)
+      run_mode(TRUE)
+      stopApp(returnValue = list(dir = project_dir, run = TRUE))
     })
 
-    observeEvent(input$save_generate_btn, {
+    save_project <- function(run_pipeline) {
       req(input$project_name, input$base_dir, loaded_data())
 
       sel <- input$selection_table_rows_selected
@@ -1770,9 +1782,21 @@ mETHYLotest.EPIC.ProjectUI <- function(prefill_pheno = NULL,
       tryCatch({
         writeLines(lines, config_file)
         final_path(project_dir)
-        showNotification("EPIC project created.", type = "message")
+        run_mode(run_pipeline)
+        showNotification(sprintf("EPIC project created (%s).", 
+                                 ifelse(run_pipeline, "Run", "Setup Only")), 
+                         type = "message")
+        stopApp(returnValue = list(dir = project_dir, run = run_pipeline))
       }, error = function(e)
         showNotification(paste("Save failed:", e$message), type = "error"))
+    }
+    
+    observeEvent(input$save_setup_btn, {
+      save_project(run_pipeline = FALSE)
+    })
+    
+    observeEvent(input$save_generate_btn, {
+      save_project(run_pipeline = TRUE)
     })
   }
 
