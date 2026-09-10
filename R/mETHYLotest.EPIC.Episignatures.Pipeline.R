@@ -400,6 +400,9 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
   # 8. SCORING LOOP
   # ========================================================================
 
+  min_db <- if (!is.null(cfg$episig_min_delta_beta)) cfg$episig_min_delta_beta else 0.10
+  message("[Episignatures] Using Delta-Beta significance threshold: |dB| >= ", min_db)
+
   results_list <- list()
 
   for (i in seq_len(nrow(episignatures))) {
@@ -452,7 +455,7 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
       p <- 2 * pnorm(-abs(z))
       db <- val_beta - mu_beta
 
-      sig_idx <- which(p < 0.05)
+      sig_idx <- which(p < 0.05 & abs(db) >= min_db)
       n_sig <- length(sig_idx)
       pct_sig <- round(100 * n_sig / found_count, 2)
       coverage <- round(100 * found_count / total_count, 2)
