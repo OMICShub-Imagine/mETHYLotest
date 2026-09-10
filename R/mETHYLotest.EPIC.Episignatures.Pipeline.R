@@ -205,13 +205,21 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
   } else {
     # Fallback heuristic if not defined in config
     groups <- unique(myLoad$pd[[col_group]])
-    ctrl_group_name <- if ("CTL" %in% groups) "CTL"
-      else if ("Control" %in% groups) "Control"
-      else if ("Controls" %in% groups) "Controls"
-      else NULL
+    ctrl_group_name <- if ("CTL" %in% groups) {
+      "CTL"
+    } else if ("Control" %in% groups) {
+      "Control"
+    } else if ("Controls" %in% groups) {
+      "Controls"
+    } else if ("WT" %in% groups) {
+      "WT"
+    } else {
+      NULL
+    }
   }
 
   user_has_controls <- !is.null(ctrl_group_name) && any(myLoad$pd[[col_group]] == ctrl_group_name)
+  is_pure_epicv2 <- any(grepl("_", rownames(myLoad$beta)[1:100]))
 
   if (user_has_controls) {
     message("[Episignatures] ========================================")
@@ -219,15 +227,12 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
     message("[Episignatures] Bypassing internal package controls.")
     message("[Episignatures] ========================================")
 
-    # Ensure myLoad has EPICv2 suffixes stripped if it's a single EPICv2 plate (bypassed HarmonizeArrays)
-    if (any(grepl("_", rownames(myLoad$beta)[1:100]))) {
-      message("[Episignatures] EPICv2 suffixes detected in user data. Stripping suffixes...")
-      myLoad <- .epicv2_strip_suffixes(myLoad, duplicate_strategy = "mean")
-    }
-
     beta_combined <- myLoad$beta
     control_samples <- myLoad$pd[["Sample_Name"]][myLoad$pd[[col_group]] == ctrl_group_name]
     test_samples <- setdiff(colnames(beta_combined), c(control_samples, duplicated_samples))
+
+    # We do NOT strip suffixes here. We leave it as EPICv2 for preprocessing to prevent BMIQ crashes.
+    current_arraytype <- if (is_pure_epicv2) "EPICv2" else "EPICv1"
 
     message(
       "[Episignatures] Test: ", length(test_samples),
@@ -277,6 +282,8 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
     control_samples <- colnames(myLoad_ctl$beta)
     test_samples <- setdiff(colnames(myLoad$beta), duplicated_samples)
 
+    current_arraytype <- "EPICv1"
+
     message(
       "[Episignatures] Test: ", length(test_samples),
       " | Controls: ", length(control_samples)
@@ -290,24 +297,35 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
   # 1. Normalization (BMIQ)
   if (isTRUE(cfg$normalize_data)) {
     message("[Episignatures] Normalizing combined dataset (method = BMIQ)...")
+
+    # Hack to force PSOCK parallel workers to load ChAMPdata and prevent annotation crash
+    old_pkgs <- Sys.getenv("R_DEFAULT_PACKAGES")
+    if (old_pkgs == "") {
+      Sys.setenv(R_DEFAULT_PACKAGES = "datasets,utils,grDevices,graphics,stats,methods,ChAMPdata")
+    } else {
+      Sys.setenv(R_DEFAULT_PACKAGES = paste(old_pkgs, "ChAMPdata", sep = ","))
+    }
+
     beta_combined <- ChAMP::champ.norm(
       beta = beta_combined,
       method = "BMIQ",
-      arraytype = "EPICv1",
-      cores = 1, # Forced to 1 to avoid worker namespace issues with ChAMPdata
+      arraytype = current_arraytype,
+      cores = if (!is.null(cfg$num_cores)) cfg$num_cores else 1,
       plotBMIQ = FALSE,
       resultsDir = episig_dir
     )
+
+    Sys.setenv(R_DEFAULT_PACKAGES = old_pkgs)
   }
 
   # 2. Batch Correction (ComBat)
   if (isTRUE(cfg$perform_batch_correction)) {
     if (user_has_controls) {
       message("[Episignatures] Batch correction requested on user's dataset...")
-      
+
       batch_vars <- cfg$combat_vars
       bio_var <- cfg$combat_bio_var
-      
+
       if (is.null(batch_vars) || length(batch_vars) == 0) {
         warning("[Episignatures] No batch variables (combat_vars) defined in config. Skipping ComBat.")
       } else {
@@ -316,25 +334,41 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
           # Ensure batch variable has >1 valid level
           if (length(unique(na.omit(pd_combined[[bv]]))) > 1) {
             message("[Episignatures] Running ComBat for batch: ", bv)
-            tryCatch({
-              beta_combined <- ChAMP::champ.runCombat(
-                beta = beta_combined,
-                pd = pd_combined,
-                variablename = bio_var,
-                batchname = bv,
-                logitTrans = isTRUE(cfg$combat_logit_transform)
-              )
-            }, error = function(e) {
-              warning("[Episignatures] ComBat failed for batch '", bv, "': ", e$message)
-            })
+            tryCatch(
+              {
+                beta_combined <- ChAMP::champ.runCombat(
+                  beta = beta_combined,
+                  pd = pd_combined,
+                  variablename = bio_var,
+                  batchname = bv,
+                  logitTrans = isTRUE(cfg$combat_logit_transform)
+                )
+              },
+              error = function(e) {
+                warning("[Episignatures] ComBat failed for batch '", bv, "': ", e$message)
+              }
+            )
           } else {
-             message("[Episignatures] Skipping batch '", bv, "': only 1 level found.")
+            message("[Episignatures] Skipping batch '", bv, "': only 1 level found.")
           }
         }
       }
     } else {
       warning(sprintf("[Episignatures] WARNING: Batch correction requested, but no control group '%s' found in user cohort! ComBat would erase the disease signature (perfect confounding between User_Lab and Internal_Pkg). Skipping ComBat.", ctrl_group_name))
     }
+  }
+
+  # ========================================================================
+  # 6c. POST-PROCESSING (STRIP EPICv2 SUFFIXES IF NEEDED)
+  # ========================================================================
+
+  # If we kept the dataset as pure EPICv2 for pre-processing (BMIQ/ComBat),
+  # we must strip the suffixes NOW before Episignature scoring.
+  if (user_has_controls && is_pure_epicv2) {
+    message("[Episignatures] Pre-processing complete. Stripping EPICv2 suffixes for Episignature scoring...")
+    dummy_load <- list(beta = beta_combined)
+    dummy_load <- .epicv2_strip_suffixes(dummy_load, duplicate_strategy = "mean")
+    beta_combined <- dummy_load$beta
   }
 
   # ========================================================================
