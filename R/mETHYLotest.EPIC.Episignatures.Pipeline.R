@@ -229,7 +229,7 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
 
     beta_combined <- myLoad$beta
     control_samples <- myLoad$pd[["Sample_Name"]][myLoad$pd[[col_group]] == ctrl_group_name]
-    
+
     if (length(control_samples) < 2) {
       stop("[Episignatures] ERROR: You only have ", length(control_samples), " control sample(s) ('", ctrl_group_name, "'). At least 2 are required to calculate a baseline variance (Standard Deviation) for Z-scores. Please either provide more controls, or rename your control group to let the pipeline automatically use the package's internal controls.")
     }
@@ -303,24 +303,14 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
   if (isTRUE(cfg$normalize_data)) {
     message("[Episignatures] Normalizing combined dataset (method = BMIQ)...")
 
-    # Hack to force PSOCK parallel workers to load ChAMPdata and prevent annotation crash
-    old_pkgs <- Sys.getenv("R_DEFAULT_PACKAGES")
-    if (old_pkgs == "") {
-      Sys.setenv(R_DEFAULT_PACKAGES = "datasets,utils,grDevices,graphics,stats,methods,ChAMPdata")
-    } else {
-      Sys.setenv(R_DEFAULT_PACKAGES = paste(old_pkgs, "ChAMPdata", sep = ","))
-    }
-
     beta_combined <- ChAMP::champ.norm(
       beta = beta_combined,
       method = "BMIQ",
       arraytype = current_arraytype,
-      cores = if (!is.null(cfg$num_cores)) cfg$num_cores else 1,
+      cores = cfg$norm_cores,
       plotBMIQ = FALSE,
       resultsDir = episig_dir
     )
-
-    Sys.setenv(R_DEFAULT_PACKAGES = old_pkgs)
   }
 
   # 2. Batch Correction (ComBat)
@@ -335,27 +325,35 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
         warning("[Episignatures] No batch variables (combat_vars) defined in config. Skipping ComBat.")
       } else {
         pd_combined <- myLoad$pd
+
+        # Filter out batch variables that have only 1 level (ComBat requires >1)
+        valid_batch_vars <- c()
         for (bv in batch_vars) {
-          # Ensure batch variable has >1 valid level
           if (length(unique(na.omit(pd_combined[[bv]]))) > 1) {
-            message("[Episignatures] Running ComBat for batch: ", bv)
-            tryCatch(
-              {
-                beta_combined <- ChAMP::champ.runCombat(
-                  beta = beta_combined,
-                  pd = pd_combined,
-                  variablename = bio_var,
-                  batchname = bv,
-                  logitTrans = isTRUE(cfg$combat_logit_transform)
-                )
-              },
-              error = function(e) {
-                warning("[Episignatures] ComBat failed for batch '", bv, "': ", e$message)
-              }
-            )
+            valid_batch_vars <- c(valid_batch_vars, bv)
           } else {
             message("[Episignatures] Skipping batch '", bv, "': only 1 level found.")
           }
+        }
+
+        if (length(valid_batch_vars) > 0) {
+          message("[Episignatures] Running ComBat simultaneously for batch factors: ", paste(valid_batch_vars, collapse = ", "))
+          tryCatch(
+            {
+              beta_combined <- ChAMP::champ.runCombat(
+                beta = beta_combined,
+                pd = pd_combined,
+                variablename = bio_var,
+                batchname = valid_batch_vars,
+                logitTrans = isTRUE(cfg$combat_logit_transform)
+              )
+            },
+            error = function(e) {
+              warning("[Episignatures] ComBat failed for variables '", paste(valid_batch_vars, collapse = ", "), "': ", e$message)
+            }
+          )
+        } else {
+          message("[Episignatures] No valid batch variables with >1 level available. Skipping ComBat.")
         }
       }
     } else {
