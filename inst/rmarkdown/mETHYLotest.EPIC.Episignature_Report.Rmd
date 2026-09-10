@@ -60,6 +60,14 @@ samples    <- unique(df_res$Sample)
 signatures <- unique(df_res$Signature)
 ```
 
+# Introduction
+
+**mETHYLotest** is an open-source tool for DNA methylation analysis, specifically designed for evaluating Episignatures on Illumina EPIC arrays. For more details, source code, and updates, visit the official repository: [OMICShub-Imagine/mETHYLotest](https://github.com/OMICShub-Imagine/mETHYLotest).
+
+<div class="alert alert-warning" style="margin-top: 20px;">
+  <strong>Clinical Disclaimer:</strong> In accordance with Illumina's guidelines, EPIC arrays are for <strong>Research Use Only (RUO)</strong> and are not intended for diagnostic use. The mETHYLotest Episignature module is an exploratory bioinformatics tool designed to provide a general idea of methylation profile similarities against known syndrome signatures. Results must be interpreted with caution by qualified professionals and do not constitute a formal medical diagnosis. Furthermore, as mETHYLotest is an actively maintained package, future updates to algorithms, thresholds, or reference databases may slightly alter results.
+</div>
+
 # Overview
 
 ```{r overview_metrics}
@@ -87,7 +95,7 @@ div(class = "metric-row",
 
 The heatmap shows the **Global Score** (weighted percentage of significant
 probes relative to the total signature size) for each sample-signature
-combination. Red = strong match.
+combination. Blue = 0%, Red = 100%.
 
 ```{r heatmap, fig.height=max(5, n_sigs * 0.4 + 2), fig.width=max(8, n_samples * 0.8 + 3)}
 mat <- reshape2::acast(df_res, Signature ~ Sample,
@@ -98,12 +106,9 @@ p_heat <- plot_ly(
   x = colnames(mat),
   y = rownames(mat),
   type = "heatmap",
-  colorscale = list(
-    c(0, "#f7f7f7"), c(0.2, "#fde0dd"),
-    c(0.5, "#fa9fb5"), c(0.8, "#c51b8a"),
-    c(1, "#7a0177")),
+  colorscale = list(c(0, "blue"), c(1, "red")),
   zmin = 0,
-  zmax = max(mat, 100),
+  zmax = 100,
   hovertemplate = paste0(
     "Sample: %{x}<br>Signature: %{y}<br>",
     "Score: %{z:.1f}%<extra></extra>")

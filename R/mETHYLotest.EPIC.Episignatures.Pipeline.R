@@ -307,7 +307,7 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
       beta = beta_combined,
       method = "BMIQ",
       arraytype = current_arraytype,
-      cores = cfg$norm_cores,
+      cores = if (!is.null(cfg$norm_cores)) cfg$norm_cores else if (!is.null(cfg$num_cores)) cfg$num_cores else 1,
       plotBMIQ = FALSE,
       resultsDir = episig_dir
     )
@@ -522,6 +522,11 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
   # ========================================================================
   # 9. AGGREGATE AND EXPORT
   # ========================================================================
+
+  if (length(results_list) == 0L) {
+    warning("[Episignatures] No results generated (perhaps no common probes found or delta-beta threshold too strict).")
+    return(invisible(NULL))
+  }
 
   all_results <- do.call(rbind, results_list)
 
