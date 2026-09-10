@@ -68,7 +68,8 @@ mETHYLotest is a wrapper package providing two analysis modules with Shiny-based
 It offers two main pipelines for your data and exposes individual functions that you can integrate into your own workflows for automated QC, reporting, interactive exploration, and more.
 
 <div class="alert alert-warning" style="margin-top: 20px;">
-  <strong>Disclaimer:</strong> mETHYLotest has been developed and tested internally on small datasets at Institut Imagine. As it is still in early development, updates will be published as issues are identified and resolved.<br><br>
+  <strong>Clinical Disclaimer:</strong> In accordance with Illumina's guidelines, EPIC arrays are for <strong>Research Use Only (RUO)</strong> and are not intended for diagnostic use. The mETHYLotest Episignature module is an exploratory bioinformatics tool designed to provide a general idea of methylation profile similarities against known syndrome signatures. Results must be interpreted with caution by qualified professionals and do not constitute a formal medical diagnosis.<br><br>
+  <strong>Development & Support:</strong> mETHYLotest has been developed and tested internally on small datasets at Institut Imagine. As it is an actively maintained package still in early development, future updates to algorithms, thresholds, or reference databases may slightly alter results.<br><br>
   Bug reports, feature requests, and feedback are welcome: <a href="https://github.com/OMICShub-Imagine/mETHYLotest/issues">Open an issue</a>.<br>
   mETHYLotest is a free R package and comes with ABSOLUTELY NO WARRANTY.
 </div>
