@@ -229,6 +229,11 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
 
     beta_combined <- myLoad$beta
     control_samples <- myLoad$pd[["Sample_Name"]][myLoad$pd[[col_group]] == ctrl_group_name]
+    
+    if (length(control_samples) < 2) {
+      stop("[Episignatures] ERROR: You only have ", length(control_samples), " control sample(s) ('", ctrl_group_name, "'). At least 2 are required to calculate a baseline variance (Standard Deviation) for Z-scores. Please either provide more controls, or rename your control group to let the pipeline automatically use the package's internal controls.")
+    }
+
     test_samples <- setdiff(colnames(beta_combined), c(control_samples, duplicated_samples))
 
     # We do NOT strip suffixes here. We leave it as EPICv2 for preprocessing to prevent BMIQ crashes.
