@@ -326,14 +326,22 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
       } else {
         pd_combined <- myLoad$pd
 
-        # Filter out batch variables that have only 1 level (ComBat requires >1)
-        valid_batch_vars <- c()
-        for (bv in batch_vars) {
-          if (length(unique(na.omit(pd_combined[[bv]]))) > 1) {
-            valid_batch_vars <- c(valid_batch_vars, bv)
-          } else {
-            message("[Episignatures] Skipping batch '", bv, "': only 1 level found.")
-          }
+        # Check confounding using the package's robust pre-flight check
+        conf_result <- mETHYLotest.EPIC.checkConfounding(
+          pd           = pd_combined,
+          variablename = bio_var,
+          batchname    = batch_vars
+        )
+
+        valid_batch_vars <- conf_result$clean
+
+        if (length(conf_result$confounded) > 0L) {
+          warning(
+            "[Episignatures] CONFOUNDING WARNING: Batch variable(s) '",
+            paste(conf_result$confounded, collapse = ", "),
+            "' are confounded with the biological variable '", bio_var,
+            "'. They have been excluded to prevent ComBat from crashing."
+          )
         }
 
         if (length(valid_batch_vars) > 0) {
