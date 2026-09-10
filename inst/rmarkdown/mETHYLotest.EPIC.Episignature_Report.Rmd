@@ -328,6 +328,46 @@ div(class = "method-box",
 
 ---
 
+# Reference Database
+
+The following table lists the metadata for all episignatures available in the package, including the associated pathology, gene/region, and source publication (PMID).
+
+```{r reference_database}
+episig_tsv <- system.file("extdata", "episignatures.tsv", package = "mETHYLotest")
+if (file.exists(episig_tsv)) {
+  ref_df <- read.delim(episig_tsv, header = TRUE, stringsAsFactors = FALSE)
+  
+  # Format PMID as external link if it contains numbers
+  if ("PMID" %in% colnames(ref_df)) {
+    ref_df$PMID <- sapply(ref_df$PMID, function(x) {
+      if (grepl("^[0-9, ]+$", x)) {
+        pmids <- strsplit(as.character(x), ", ")[[1]]
+        links <- paste0("<a href='https://pubmed.ncbi.nlm.nih.gov/", pmids, "' target='_blank'>", pmids, "</a>")
+        paste(links, collapse = ", ")
+      } else {
+        x
+      }
+    })
+  }
+
+  datatable(
+    ref_df,
+    escape = FALSE,
+    rownames = FALSE,
+    extensions = "Buttons",
+    options = list(
+      pageLength = 10, scrollX = TRUE,
+      dom = "Bfrtip",
+      buttons = c("copy", "csv", "excel")
+    )
+  )
+} else {
+  cat("Reference database file not found in package.")
+}
+```
+
+---
+
 # Session Info
 
 ```{r session}
