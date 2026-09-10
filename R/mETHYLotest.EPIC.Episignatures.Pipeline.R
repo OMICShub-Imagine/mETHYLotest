@@ -199,8 +199,19 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
   # 5. LOAD CONTROLS & MERGE DATASETS
   # ========================================================================
 
-  ctrl_group_name <- cfg$compare_group[1]
-  user_has_controls <- any(myLoad$pd[[col_group]] == ctrl_group_name)
+  # Determine control group name
+  if (!is.null(cfg$compare_group) && length(cfg$compare_group) > 0) {
+    ctrl_group_name <- cfg$compare_group[1]
+  } else {
+    # Fallback heuristic if not defined in config
+    groups <- unique(myLoad$pd[[col_group]])
+    ctrl_group_name <- if ("CTL" %in% groups) "CTL"
+      else if ("Control" %in% groups) "Control"
+      else if ("Controls" %in% groups) "Controls"
+      else NULL
+  }
+
+  user_has_controls <- !is.null(ctrl_group_name) && any(myLoad$pd[[col_group]] == ctrl_group_name)
 
   if (user_has_controls) {
     message("[Episignatures] ========================================")
