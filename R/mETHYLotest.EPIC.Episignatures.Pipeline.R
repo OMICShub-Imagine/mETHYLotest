@@ -318,12 +318,27 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
     if (user_has_controls) {
       message("[Episignatures] Batch correction requested on user's dataset...")
 
-      batch_vars <- cfg$combat_vars
-      bio_var <- cfg$combat_bio_var
+      batch_vars <- cfg$batch_cols
+      bio_var <- if (!is.null(cfg$biological_variable)) cfg$biological_variable else col_group
 
       if (is.null(batch_vars) || length(batch_vars) == 0) {
-        warning("[Episignatures] No batch variables (combat_vars) defined in config. Skipping ComBat.")
+        warning("[Episignatures] No batch variables (batch_cols) defined in config. Skipping ComBat.")
       } else {
+        # Map UI names to pd names
+        col_name_map <- c(
+          "Sentrix_ID"       = "Slide",
+          "Sentrix_Position" = "Array",
+          "Sample_Name"      = "Sample_Name",
+          "Sample_Group"     = "Sample_Group"
+        )
+        map_col <- function(col) {
+          mapped <- col_name_map[col]
+          ifelse(is.na(mapped), col, mapped)
+        }
+        
+        batch_vars <- map_col(batch_vars)
+        bio_var    <- map_col(bio_var)
+
         pd_combined <- myLoad$pd
 
         # Check confounding using the package's robust pre-flight check
