@@ -546,7 +546,7 @@ if (!is.null(df_controls_merged) && nrow(df_controls_merged) > 0) {
   }
 
   # ── Pure plotly (no static image) ──
-  p <- plot_ly(df_controls_merged,
+  p <- plotly::plot_ly(df_controls_merged,
                x = ~SampleLabel,
                y = ~MethylationPercentage,
                color = ~ControlType,
@@ -560,7 +560,7 @@ if (!is.null(df_controls_merged) && nrow(df_controls_merged) > 0) {
                               "<br>Meth: ",
                               round(MethylationPercentage, 2), "%"),
                hoverinfo = "text") %>%
-    layout(
+    plotly::layout(
       title = "Control Genome Methylation -- All Samples",
       xaxis = list(title = "", tickangle = 45),
       yaxis = list(title = "Methylation (%)", range = c(0, 105)),
@@ -581,7 +581,8 @@ if (!is.null(df_controls_merged) && nrow(df_controls_merged) > 0) {
       )
     )
 
-  p
+  # We use tagList to correctly render the widget inside a results='asis' chunk
+  print(htmltools::tagList(p))
 
 } else {
   cat('<div class="qc-box ok-card">\n')

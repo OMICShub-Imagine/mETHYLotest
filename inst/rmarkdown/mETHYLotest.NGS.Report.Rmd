@@ -441,7 +441,9 @@ if (!is.null(diff_results)) {
     sig <- fd$qvalue < diff_qvalue_report & abs(fd$meth.diff) >= diff_cutoff_report
     if (sum(sig) == 0) { cat("No DMCs.\n"); next }
     ds <- fd[sig, ]; ds$Dir <- ifelse(ds$meth.diff > 0, "Hyper", "Hypo")
-    ds$chr_f <- factor(gsub("chr", "", ds$chr), levels = c(as.character(1:22), "X", "Y", "M"))
+    pres <- unique(gsub("chr", "", ds$chr))
+    ord <- intersect(c(as.character(1:22), "X", "Y", "M"), pres)
+    ds$chr_f <- factor(gsub("chr", "", ds$chr), levels = c(ord, setdiff(pres, ord)))
     cc <- as.data.frame(table(ds$chr_f, ds$Dir), stringsAsFactors = FALSE)
     colnames(cc) <- c("Chr", "Dir", "N"); cc <- cc[cc$N > 0, ]
     if (nrow(cc) > 0) {
@@ -471,12 +473,12 @@ if (!is.null(diff_results)) {
 ```{r annotation, results='asis', fig.height=5}
 annot_dir <- file.path(res_dir, "Annotation")
 if (dir.exists(annot_dir) && has_readxl) {
-  afs <- list.files(annot_dir, "^Annotated_DMCs_.*\\.xlsx$", full.names = TRUE)
+  afs <- list.files(annot_dir, "^Annotated_DMCs_.*\\.csv$", full.names = TRUE)
   if (length(afs) > 0) {
     for (af in afs) {
-      mn <- gsub("^Annotated_DMCs_|\\.xlsx$", "", basename(af))
+      mn <- gsub("^Annotated_DMCs_|\\.csv$", "", basename(af))
       cat(sprintf("\n\n## %s\n\n", mn))
-      da <- tryCatch(as.data.frame(readxl::read_excel(af)), error = function(e) NULL)
+      da <- tryCatch(read.csv(af, stringsAsFactors = FALSE), error = function(e) NULL)
       if (is.null(da) || nrow(da) == 0) { cat("No data.\n"); next }
 
       ad <- if (!is.null(cfg$annot_diff_cutoff)) cfg$annot_diff_cutoff else 25
