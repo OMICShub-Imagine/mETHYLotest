@@ -335,9 +335,9 @@ mETHYLotest.EPIC.Episignatures <- function(project_directory) {
           mapped <- col_name_map[col]
           ifelse(is.na(mapped), col, mapped)
         }
-        
+
         batch_vars <- map_col(batch_vars)
-        bio_var    <- map_col(bio_var)
+        bio_var <- map_col(bio_var)
 
         pd_combined <- myLoad$pd
 

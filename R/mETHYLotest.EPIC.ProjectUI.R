@@ -578,13 +578,19 @@ mETHYLotest.EPIC.ProjectUI <- function(prefill_pheno = NULL,
                 "input.do_dmp == true",
                 div(class = "param-section",
                     fluidRow(
-                      column(6,
+                      column(4,
                              numericInput("dmp_adj_p_val",
                                           "Adjusted P-value (adjPVal)",
                                           value = 0.05, min = 0,
                                           max = 1, step = 0.01)
                       ),
-                      column(6,
+                      column(4,
+                             numericInput("dmp_min_delta_beta",
+                                          "Min Delta-Beta (|dB|)",
+                                          value = 0.10, min = 0,
+                                          max = 1, step = 0.05)
+                      ),
+                      column(4,
                              selectInput("dmp_adjust_method",
                                          "Adjustment method (adjust.method)",
                                          choices = c("BH", "bonferroni",
@@ -952,7 +958,7 @@ mETHYLotest.EPIC.ProjectUI <- function(prefill_pheno = NULL,
       "do_batch_correction", "combat_logit_transform",
       "analysis_pheno", "do_specific_comparison",
       "compare_group_1", "compare_group_2",
-      "do_dmp", "dmp_adj_p_val", "dmp_adjust_method",
+      "do_dmp", "dmp_adj_p_val", "dmp_min_delta_beta", "dmp_adjust_method",
       "do_dmr", "dmr_method", "dmr_min_probes", "dmr_adj_p_val",
       "dmr_cores", "dmr_bh_cutoff", "dmr_bh_max_gap", "dmr_bh_B",
       "dmr_bh_smooth", "dmr_bh_pick_cutoff",
@@ -960,6 +966,7 @@ mETHYLotest.EPIC.ProjectUI <- function(prefill_pheno = NULL,
       "dmr_pl_min_sep", "dmr_pl_min_size", "dmr_pl_adj_p_probe",
       "do_block", "block_max_cluster_gap", "block_min_num",
       "block_B", "block_cores",
+      "do_episignatures", "episig_min_delta_beta",
       "do_gsea", "gsea_adj_p_val", "gsea_method",
       "do_cna", "cna_control_group", "cna_freq_threshold",
       "cna_genome_build",
@@ -1185,8 +1192,7 @@ mETHYLotest.EPIC.ProjectUI <- function(prefill_pheno = NULL,
                                 selected = cfg$compare_group[2L])
             }
 
-            .uc("do_dmp"); .un("dmp_adj_p_val")
-            .us("dmp_adjust_method")
+            .uc("do_dmp"); .un("dmp_adj_p_val"); .un("dmp_min_delta_beta"); .us("dmp_adjust_method")
 
             .uc("do_dmr"); .us("dmr_method")
             for (id in c("dmr_min_probes", "dmr_adj_p_val", "dmr_cores",
@@ -1201,6 +1207,8 @@ mETHYLotest.EPIC.ProjectUI <- function(prefill_pheno = NULL,
             for (id in c("block_max_cluster_gap", "block_min_num",
                          "block_B", "block_cores"))
               .un(id)
+
+            .uc("do_episignatures"); .un("episig_min_delta_beta")
 
             .uc("do_gsea"); .un("gsea_adj_p_val"); .us("gsea_method")
 
@@ -1479,6 +1487,7 @@ mETHYLotest.EPIC.ProjectUI <- function(prefill_pheno = NULL,
                        tags$li(paste("DMP:",   fmt_bool(input$do_dmp))),
                        tags$li(paste("DMR:",   fmt_bool(input$do_dmr))),
                        tags$li(paste("Block:", fmt_bool(input$do_block))),
+                       tags$li(paste("Episig:", fmt_bool(input$do_episignatures))),
                        tags$li(paste("GSEA:",  fmt_bool(input$do_gsea))),
                        tags$li(paste("CNA:",   fmt_bool(input$do_cna)))
                      )
@@ -1699,6 +1708,8 @@ mETHYLotest.EPIC.ProjectUI <- function(prefill_pheno = NULL,
                 fmt_bool(input$do_dmp)),
         sprintf("project_config$dmp_adj_p_val     <- %s",
                 null_or(input$dmp_adj_p_val, 0.05)),
+        sprintf("project_config$dmp_min_delta_beta <- %s",
+                null_or(input$dmp_min_delta_beta, 0.10)),
         sprintf('project_config$dmp_adjust_method <- "%s"',
                 null_or(input$dmp_adjust_method, "BH")),
         "",
@@ -1748,6 +1759,12 @@ mETHYLotest.EPIC.ProjectUI <- function(prefill_pheno = NULL,
                 null_or(input$block_B, 500)),
         sprintf("project_config$block_cores          <- %s",
                 null_or(input$block_cores, default_cores)),
+        "",
+        "# Episignatures",
+        sprintf("project_config$do_episignatures    <- %s",
+                fmt_bool(input$do_episignatures)),
+        sprintf("project_config$episig_min_delta_beta <- %s",
+                null_or(input$episig_min_delta_beta, 0.10)),
         "",
         "# GSEA (champ.GSEA)",
         sprintf("project_config$do_gsea        <- %s",

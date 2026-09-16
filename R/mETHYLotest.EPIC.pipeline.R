@@ -934,7 +934,8 @@ mETHYLotest.EPIC.pipeline <- function(project_directory = "") {
     adj_threshold  <- if (!is.null(cfg$dmp_adj_p_val))
       cfg$dmp_adj_p_val else 0.05
     max_sig_cpgs   <- 500L
-    min_delta_beta <- 0.1
+    min_delta_beta <- if (!is.null(cfg$dmp_min_delta_beta))
+      cfg$dmp_min_delta_beta else 0.10
 
     for (comp in names(myDMP)) {
       df_comp <- myDMP[[comp]]
