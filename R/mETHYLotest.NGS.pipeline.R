@@ -644,40 +644,39 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
   cluster_method <- if (!is.null(cfg$cluster_method))
     cfg$cluster_method else "ward"
 
-  png(file.path(fig_dir, "Sample_Correlation.png"),
-      width = 1000, height = 1000, res = 150)
-  methylKit::getCorrelation(meth, plot = TRUE)
-  dev.off()
-
   pdf(file.path(fig_dir, "Sample_Correlation.pdf"),
       width = 10, height = 10)
+  dev.control(displaylist = "enable")
   methylKit::getCorrelation(meth, plot = TRUE)
-  dev.off()
+  p_corr <- recordPlot()
+  invisible(dev.off())
+
+  png(file.path(fig_dir, "Sample_Correlation.png"),
+      width = 1000, height = 1000, res = 150)
+  replayPlot(p_corr)
+  invisible(dev.off())
 
   # Clustering
-  png(file.path(fig_dir, "Sample_Clustering.png"),
-      width = 1000, height = 800, res = 150)
-  methylKit::clusterSamples(meth, dist = dist_method,
-                            method = cluster_method, plot = TRUE)
-  dev.off()
-
   pdf(file.path(fig_dir, "Sample_Clustering.pdf"),
       width = 10, height = 8)
-  methylKit::clusterSamples(meth, dist = dist_method,
-                            method = cluster_method, plot = TRUE)
-  dev.off()
-
+  dev.control(displaylist = "enable")
   hc <- methylKit::clusterSamples(meth, dist = dist_method,
-                                  method = cluster_method,
-                                  plot = FALSE)
+                                  method = cluster_method, plot = TRUE)
+  p_clust <- recordPlot()
+  invisible(dev.off())
+
+  png(file.path(fig_dir, "Sample_Clustering.png"),
+      width = 1000, height = 800, res = 150)
+  replayPlot(p_clust)
+  invisible(dev.off())
+
   saveRDS(hc, file.path(interim_dir, "clustering_hc_object.rds"))
 
   # PCA
   png(file.path(fig_dir, "QC_PCA.png"), width=800, height=800, res=150)
-  methylKit::PCASamples(meth)
-  dev.off()
-
   pca_res <- methylKit::PCASamples(meth, obj.return=TRUE)
+  invisible(dev.off())
+
   if (!is.null(pca_res) && !is.null(pca_res$x)) {
     pca_coords <- data.frame(Sample_Name = rownames(pca_res$x), pca_res$x)
     write.csv(pca_coords, file.path(fig_dir, "PCA_coords.csv"), row.names = FALSE)
