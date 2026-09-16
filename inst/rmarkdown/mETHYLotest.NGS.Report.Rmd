@@ -266,10 +266,10 @@ if (dir.exists(qc_base)) {
     
     # Extract iter number (default to 1)
     df_cov$iter <- 1
-    iter_match <- regexpr("iter_\\d+", df_cov$base)
+    iter_match <- regexpr("iter\\d+", df_cov$base)
     has_iter <- iter_match > 0
     if (any(has_iter)) {
-      df_cov$iter[has_iter] <- as.numeric(gsub("iter_", "", regmatches(df_cov$base, iter_match)[has_iter]))
+      df_cov$iter[has_iter] <- as.numeric(gsub("iter", "", regmatches(df_cov$base, iter_match)[has_iter]))
     }
     
     # Sort by coverage, then by iteration (descending), and keep only the latest iteration per coverage
