@@ -521,7 +521,7 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
     if (ui_res$action == "proceed") {
 
       # Apply final chromosome filter if user changed it before clicking proceed
-      if (!is.null(ui_res$chrs_to_keep) && length(ui_res$chrs_to_keep) < length(all_chrs)) {
+      if (!is.null(ui_res$chrs_to_keep) && !identical(sort(ui_res$chrs_to_keep), sort(kept_chrs))) {
         kept_chrs <- ui_res$chrs_to_keep
         filtered <- lapply(temp_filt, function(s) {
           d <- methylKit::getData(s)
@@ -530,6 +530,27 @@ mETHYLotest.NGS.pipeline <- function(project_directory = "") {
           sub_s
         })
         temp_filt <- new("methylRawList", filtered, treatment = temp_filt@treatment)
+        
+        # ── Re-run QC to update PNG plots for Final Report ──
+        message("[mETHYLotest] Updating QC plots with final chromosomes before proceeding...")
+        qc_data <- mETHYLotest.NGS.QC(
+          methyl_obj           = temp_filt,
+          output_base_dir      = qc_dir,
+          chromosomes          = kept_chrs,
+          current_min_cov      = current_cov,
+          unite_destrand       = cfg$unite_destrand,
+          save_summary         = TRUE,
+          precomputed_controls = all_controls_precomputed)
+
+        df_gm <- qc_data$df_global_meth
+        if (!is.null(df_gm)) {
+          df_gm$Group <- vapply(as.character(df_gm$Sample), function(sid) {
+            tx <- active_treatments[sid]
+            if (is.na(tx)) "Unknown"
+            else if (tx == 0) "Control (0)"
+            else "Case (1)"
+          }, character(1))
+        }
       }
 
       # ============================================════════════════
