@@ -72,6 +72,8 @@ Imports:
     scales,
     caret,
     e1071,
+    kernlab,
+    pheatmap,
     cluster,
     pROC,
     PCAtools,
