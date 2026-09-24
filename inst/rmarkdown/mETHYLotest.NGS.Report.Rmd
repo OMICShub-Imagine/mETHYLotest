@@ -311,10 +311,12 @@ if (dir.exists(qc_base)) {
 fig_dir <- file.path(res_dir, "Comparative_Analysis", "figures")
 
 cat("## Sample Correlation\n\n")
+cat("<div class='info-box'><strong>Description:</strong> This correlation matrix shows the overall similarity of methylation profiles between each pair of samples. A strong correlation (warm colors/close to 1) indicates that the samples are highly similar. This allows for a quick check to see if replicates or samples from the same group cluster together.</div>\n\n")
 h <- embed_img(file.path(fig_dir, "Sample_Correlation.png"))
 if (!is.null(h)) cat(h) else cat("Not found.\n")
 
 cat("\n\n## Hierarchical Clustering\n\n")
+cat("<div class='info-box'><strong>Description:</strong> This dendrogram groups the samples based on their overall methylation proximity. Ideally, 'Test' and 'Control' samples should naturally separate into two distinct branches if the condition being studied has a strong impact on the global methylome.</div>\n\n")
 h <- embed_img(file.path(fig_dir, "Sample_Clustering.png"))
 if (!is.null(h)) cat(h) else cat("Not found.\n")
 
@@ -331,6 +333,9 @@ if (!is.null(meth_obj)) {
 
 ## Summary
 
+<div class="info-box">
+  <strong>Description:</strong> This table summarizes the total number of differentially methylated positions (DMCs) identified for each condition. The line plot below (DMC Count vs Threshold) illustrates how the number of DMCs changes as the methylation difference threshold (|Diff|) is made more or less strict.
+</div>
 ```{r diffmeth_summary, results='asis'}
 summary_df <- NULL
 
@@ -408,6 +413,10 @@ if (!is.null(diff_results) && length(diff_results) > 0) {
 
 ## Volcano Plots {.tabset}
 
+<div class="info-box">
+  <strong>Description:</strong> The Volcano Plot illustrates the results of the global differential methylation analysis. Each point represents a single CpG. The horizontal axis shows the biological magnitude of the methylation difference (meth.diff), while the vertical axis shows statistical significance (-log10 q-value). The colored points (Hyper/Hypo) are statistically significant DMCs passing your chosen thresholds.
+</div>
+
 ```{r volcanos, results='asis', fig.height=6}
 if (!is.null(diff_results)) {
   for (model in names(diff_results)) {
@@ -454,6 +463,10 @@ if (!is.null(diff_results)) {
 ```
 
 ## DMC Distribution {.tabset}
+
+<div class="info-box">
+  <strong>Description:</strong> This histogram displays the distribution of methylation differences (meth.diff) exclusively for significant DMCs. This provides a quick overview of whether the condition predominantly induces strong hypermethylation (skewed right) or hypomethylation (skewed left), as well as the magnitude of these changes.
+</div>
 
 ```{r dmc_dist, results='asis', fig.height=5}
 if (!is.null(diff_results)) {
@@ -597,6 +610,7 @@ for (sig_name in names(val_results)) {
 
   # ── Metrics ──
   cat("### Metrics\n\n")
+  cat("<div class='info-box'><strong>Description:</strong> This table summarizes the mathematical performance of the Machine Learning model (SVM) trained on this signature. It includes metrics such as Accuracy (classification precision) and the Silhouette score (measuring the quality of group separation). The closer these values are to 100% or 1.0, the more robust the signature.</div>\n\n")
   sil_col <- if (res$silhouette > 0.5) "#27ae60" else if (res$silhouette > 0.25) "#f39c12" else "#e74c3c"
 
   cat('<div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;">\n')
@@ -630,6 +644,7 @@ for (sig_name in names(val_results)) {
   # ── PCA ──
   if (!is.null(res$pca)) {
     cat("### PCA\n\n")
+    cat("<div class='info-box'><strong>Description:</strong> This Principal Component Analysis (PCA) projects the samples onto a 2D space using <b>only</b> the CpGs from this specific signature. If the signature is highly discriminative, the Test and Control group points will be perfectly separated into two distinct clusters.</div>\n\n")
     pca <- res$pca
     pdf <- data.frame(PC1 = pca$x[,1], PC2 = pca$x[,2],
                        Group = res$raw_data$Class, Sample = rownames(res$raw_data))
@@ -665,6 +680,7 @@ for (sig_name in names(val_results)) {
   # ── Heatmap ──
   if (!is.null(res$beta_matrix) && has_pheatmap) {
     cat("### Heatmap\n\n")
+    cat("<div class='info-box'><strong>Description:</strong> This Heatmap visually represents the methylation level of each CpG in the signature (rows) for each sample (columns). Warm colors indicate high methylation, while cool colors indicate low methylation. The dendrogram on top automatically clusters the most similar samples together.</div>\n\n")
     bm <- res$beta_matrix
     if (nrow(bm) > 150) {
       rv <- apply(bm, 1, var, na.rm = TRUE)
@@ -689,6 +705,7 @@ for (sig_name in names(val_results)) {
   # ── ROC ──
   if (!is.null(res$svm_model) && res$metric_used == "ROC") {
     cat("### ROC\n\n")
+    cat("<div class='info-box'><strong>Description:</strong> The ROC curve illustrates the diagnostic and predictive capability of the model. The Area Under the Curve (AUC) ranges from 0.5 (random chance) to 1.0 (perfect prediction). A curve that rises rapidly towards the top-left corner demonstrates a signature with excellent sensitivity and specificity.</div>\n\n")
     preds <- res$svm_model$pred
     if (!is.null(preds)) {
       if ("C" %in% colnames(preds) && !is.null(res$svm_model$bestTune$C))
@@ -716,6 +733,7 @@ for (sig_name in names(val_results)) {
   # ── Variable Importance ──
   if (!is.null(res$svm_model)) {
     cat("### Top Loci\n\n")
+    cat("<div class='info-box'><strong>Description:</strong> This Variable Importance chart ranks the top 20 most important CpGs in the signature. The algorithm assigns a score to each locus based on its actual contribution to group separation. The loci at the very top are the most critical biomarkers of this signature.</div>\n\n")
     imp_obj <- tryCatch(caret::varImp(res$svm_model, scale = FALSE), error = function(e) NULL)
     if (!is.null(imp_obj) && nrow(imp_obj$importance) > 0) {
       imp <- imp_obj$importance

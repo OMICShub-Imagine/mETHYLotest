@@ -543,6 +543,8 @@ knitr::kable(grp_tbl, format="html", table.attr='class="table table-bordered"')
 
 ## Beta Density
 
+<div class="info-box"><strong>Description:</strong> This density plot shows the global distribution of methylation beta-values across all samples. A typical healthy methylome displays a bimodal distribution, with peaks near 0 (unmethylated) and 1 (fully methylated). Deviations or shifts in these peaks can indicate global hypo- or hyper-methylation.</div>
+
 ```{r beta_density, fig.height=5}
 set.seed(42)
 n_probes <- min(50000, nrow(beta))
@@ -565,6 +567,8 @@ if (!is.null(df_d) && nrow(df_d)>0) {
 ```
 
 ## PCA {.tabset}
+
+<div class="info-box"><strong>Description:</strong> Principal Component Analysis (PCA) on the global methylome. This reduces the high-dimensional data into 2D spaces to visualize the largest sources of variance. Ideally, samples should cluster by their biological groups (Test vs Control). If they cluster by other factors (like array batch or sex), it indicates potential batch effects.</div>
 
 ```{r pca_compute}
 idx_v <- top_var_idx(beta, 10000)
@@ -615,6 +619,8 @@ ggplot(sdf, aes(PC, V)) + geom_col(fill="#8e44ad", alpha=.8) +
 ```
 
 ## t-SNE
+
+<div class="info-box"><strong>Description:</strong> t-SNE is a non-linear dimensionality reduction technique. Unlike PCA which preserves global structure, t-SNE excels at preserving local neighborhoods, making it very powerful for identifying distinct sub-populations or clusters among the samples based on their global methylation profiles.</div>
 
 ```{r tsne, fig.height=6}
 tsne_out <- NULL
@@ -668,6 +674,7 @@ sig_cpg_names <- rownames(df_full)[df_full$Status != "NS"]
 # ## Summary
 # ══════════════════════════════════════════════════════
 cat("## Summary\n\n")
+cat("<div class='info-box'><strong>Description:</strong> This table summarizes the total number of Differentially Methylated Probes (DMPs) identified between the groups across different significance thresholds. The volcano plot provides a visual representation of all analyzed probes, plotting statistical significance against the biological effect size (deltaBeta).</div>\n\n")
 
 # Stat cards
 n_total <- nrow(df_full)
@@ -744,6 +751,7 @@ render_dmp_panels(df_full, label = "All DMPs", heading = "###")
 # Heatmap of top DMPs
 if (length(sig_cpg_names) >= 2) {
   cat("### Heatmap\n\n")
+  cat("<div class='info-box'><strong>Description:</strong> This Heatmap displays the methylation levels of all significant DMPs across all samples. It allows you to visualize the global differential methylation signature. The hierarchical clustering trees automatically group samples (columns) with similar DMP profiles, which should ideally reconstruct your Test and Control groups.</div>\n\n")
   hm_cpgs <- head(sig_cpg_names[order(df_full[sig_cpg_names, "adj.P.Val"])], 100)
   hm_cpgs <- intersect(hm_cpgs, rownames(beta))
   if (length(hm_cpgs) >= 2) {
@@ -782,6 +790,7 @@ if (has_sigs) {
 
     # ── Summary sub-tab ──
     cat("### Summary\n\n")
+    cat("<div class='info-box'><strong>Description:</strong> This section focuses exclusively on the probes that overlap with the known biological signature. The table lists the specific DMPs found within this signature, and the volcano plot highlights these signature probes against the background of all other probes on the array.</div>\n\n")
 
     src <- sig_sources[sn]
     badge_col <- if (identical(src,"Default")) "#3498db" else "#27ae60"
@@ -832,6 +841,7 @@ if (has_sigs) {
     sig_in_beta <- intersect(shared, rownames(beta))
     if (length(sig_in_beta) >= 2) {
       cat("### Heatmap\n\n")
+      cat("<div class='info-box'><strong>Description:</strong> This Heatmap focuses only on the significant DMPs that are part of this specific signature. It reveals whether this restricted set of probes is sufficient to cleanly separate the Test and Control samples into distinct clusters.</div>\n\n")
       hm_cpgs <- if (length(sig_in_beta)>150) sig_in_beta[1:150] else sig_in_beta
       bhm <- impute_row_mean(beta[hm_cpgs, , drop=FALSE])
       annot_c <- data.frame(Group=groups, row.names=colnames(beta))
@@ -853,6 +863,7 @@ if (has_sigs) {
     # ── PCA ──
     if (length(sig_in_beta) >= 3) {
       cat("### PCA\n\n")
+      cat("<div class='info-box'><strong>Description:</strong> This targeted PCA projects the samples using only the significant DMPs belonging to this signature. A clear separation of the groups in this plot confirms that the signature's specific loci contain a strong biological signal distinguishing the conditions.</div>\n\n")
       bsig <- impute_row_mean(beta[sig_in_beta, , drop=FALSE])
       pca_s <- prcomp(t(bsig), scale.=TRUE, center=TRUE)
       vp_s <- round(100*pca_s$sdev^2/sum(pca_s$sdev^2), 1)
@@ -937,6 +948,7 @@ for (sig_name in names(signatures)) {
 
   # Metrics
   cat("### Metrics\n\n")
+  cat("<div class='info-box'><strong>Description:</strong> This table summarizes the performance of the Machine Learning classification model (SVM) trained on this signature. Metrics like Accuracy and Silhouette score (quality of clustering) evaluate how robustly this specific signature can diagnose or separate the sample groups.</div>\n\n")
   v <- find_val_result(sig_name, val_res)
   if (is.null(v)) {
     cat('<div class="warn-box">No validation result found for this signature.</div>\n\n')
@@ -1051,6 +1063,7 @@ for (sig_name in names(signatures)) {
   # PCA from beta
   if (length(cpgs_in_beta)>=3) {
     cat("### PCA\n\n")
+    cat("<div class='info-box'><strong>Description:</strong> This PCA projects samples using <b>all</b> available probes from this signature, regardless of whether they were individually identified as significant DMPs in the current dataset. It tests the global diagnostic power of the entire signature.</div>\n\n")
     bsig <- impute_row_mean(beta[cpgs_in_beta,,drop=FALSE])
     pca_s <- prcomp(t(bsig), scale.=TRUE, center=TRUE)
     vp_s <- round(100*pca_s$sdev^2/sum(pca_s$sdev^2), 1)
@@ -1071,6 +1084,7 @@ for (sig_name in names(signatures)) {
   # Heatmap
   if (length(cpgs_in_beta)>=2) {
     cat("### Heatmap\n\n")
+    cat("<div class='info-box'><strong>Description:</strong> This Heatmap displays the methylation levels for <b>all</b> probes in the signature. It provides a comprehensive view of the signature's behavior across your cohort, allowing you to spot consistent patterns or potential outliers in the sample clustering.</div>\n\n")
     hm_cpgs <- if (length(cpgs_in_beta)>150) cpgs_in_beta[1:150] else cpgs_in_beta
     bhm <- impute_row_mean(beta[hm_cpgs,,drop=FALSE])
     annot_c <- data.frame(Group=groups, row.names=colnames(beta))
