@@ -280,8 +280,12 @@ if (dir.exists(qc_base)) {
       df_cov$iter[has_iter] <- as.numeric(gsub("iter", "", extracted_iter))
     }
     
-    # Sort by coverage ascending, then iteration ascending for the report tabs
-    df_cov <- df_cov[order(df_cov$cov, df_cov$iter), ]
+    # Sort by coverage, then by iteration (descending), and keep only the latest iteration per coverage
+    df_cov <- df_cov[order(df_cov$cov, df_cov$iter, decreasing = TRUE), ]
+    df_cov <- df_cov[!duplicated(df_cov$cov), ]
+    
+    # Finally sort by coverage ascending for the report tabs
+    df_cov <- df_cov[order(df_cov$cov), ]
     cov_dirs <- df_cov$path
 
     for (qc_dir in cov_dirs) {
