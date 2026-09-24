@@ -251,6 +251,10 @@ if (!is.null(pheno_all) && !is.null(cfg$col_treatment)) {
 
 # Quality Control {.tabset}
 
+<div class="info-box">
+  <strong>Description:</strong> This section contains the Quality Control (QC) metrics for your samples. You will find tabs for each sequencing coverage threshold (e.g., cov_5, cov_10) and their potential filtering iterations (iter2, etc.). Inside each tab, various plots illustrate the percentage of mapped reads, CpG coverage distribution, and per-sample statistics to help you identify poor-quality samples.
+</div>
+
 ```{r qc_images, results='asis'}
 qc_base <- file.path(res_dir, "QC")
 if (dir.exists(qc_base)) {
@@ -276,12 +280,8 @@ if (dir.exists(qc_base)) {
       df_cov$iter[has_iter] <- as.numeric(gsub("iter", "", extracted_iter))
     }
     
-    # Sort by coverage, then by iteration (descending), and keep only the latest iteration per coverage
-    df_cov <- df_cov[order(df_cov$cov, df_cov$iter, decreasing = TRUE), ]
-    df_cov <- df_cov[!duplicated(df_cov$cov), ]
-    
-    # Finally sort by coverage ascending for the report tabs
-    df_cov <- df_cov[order(df_cov$cov), ]
+    # Sort by coverage ascending, then iteration ascending for the report tabs
+    df_cov <- df_cov[order(df_cov$cov, df_cov$iter), ]
     cov_dirs <- df_cov$path
 
     for (qc_dir in cov_dirs) {
@@ -293,6 +293,18 @@ if (dir.exists(qc_base)) {
       subs <- dirname(rel); subs[subs == "."] <- "General"
       for (sd in unique(subs)) {
         cat(sprintf("\n\n### %s\n\n", gsub("[/_]", " ", sd)))
+        
+        sd_lower <- tolower(sd)
+        if (grepl("coverage", sd_lower)) {
+          cat("<div class='info-box'><strong>Description:</strong> These histograms show the read coverage distribution (number of sequencing reads per CpG) for each sample. A good quality sample should have a peak matching your expected sequencing depth. A long tail to the right indicates some regions are heavily over-sequenced.</div>\n\n")
+        } else if (grepl("methylation", sd_lower)) {
+          cat("<div class='info-box'><strong>Description:</strong> These histograms display the distribution of percentage methylation per CpG for each sample. A typical mammalian methylome exhibits a strong bimodal distribution, meaning most CpGs are either completely unmethylated (near 0%) or fully methylated (near 100%). Deviations from this shape may suggest poor bisulfite conversion.</div>\n\n")
+        } else if (grepl("chromosome", sd_lower)) {
+          cat("<div class='info-box'><strong>Description:</strong> This plot shows the average methylation percentage across each chromosome. It allows you to quickly spot gross chromosomal abnormalities or massive localized methylation losses.</div>\n\n")
+        } else if (grepl("general", sd_lower)) {
+          cat("<div class='info-box'><strong>Description:</strong> General QC metrics, including global PCA or sample-wide statistics. These plots help identify technical outliers and global batch effects before moving into differential analysis.</div>\n\n")
+        }
+
         for (img in pngs[subs == sd]) {
           h <- embed_img(img)
           if (!is.null(h)) cat(sprintf("\n\n#### %s\n\n%s\n\n", tools::file_path_sans_ext(basename(img)), h))
