@@ -404,6 +404,8 @@ The complete set including unsupported regions is available in
 
 [How to use mETHYLotest with NGS (WGBS, nanopore, pacbio...) data ?](https://htmlpreview.github.io/?https://github.com/OMICShub-Imagine/mETHYLotest/blob/main/inst/tutorials/mETHYLotest_NGS-Tutorial.html)
 
+[How to score new samples against Episignatures ?](https://htmlpreview.github.io/?https://github.com/OMICShub-Imagine/mETHYLotest/blob/main/inst/tutorials/mETHYLotest_Episignatures-Tutorial.html)
+
 ```r
 library(mETHYLotest)
 

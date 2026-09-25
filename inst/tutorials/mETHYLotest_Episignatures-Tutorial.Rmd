@@ -1,0 +1,100 @@
+---
+title: "mETHYLotest Tutorial: Episignature Scoring"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: true
+    theme: flatly
+    highlight: tango
+    code_folding: show
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  eval    = FALSE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+# Introduction
+
+The **Episignature Scoring** module is a standalone analysis in `mETHYLotest` that evaluates your EPIC DNA methylation samples against known biological signatures. Typically, these signatures are sets of CpG probes that robustly identify patients with specific rare genetic diseases.
+
+This module works by:
+
+1.  Loading the raw `.idat` files for the test samples in your project.
+2.  Loading **internal control IDATs** (shipped with the package).
+3.  Merging and harmonizing the arrays automatically.
+4.  Computing **M-value Z-scores** for your samples against the internal controls for each known episignature.
+5.  Generating a dynamic **HTML Report** detailing the scoring and classification of your patients.
+
+<div class="alert alert-warning" style="margin-top: 20px;">
+  <strong>Clinical Disclaimer:</strong> In accordance with Illumina's guidelines, EPIC arrays are for <strong>Research Use Only (RUO)</strong> and are not intended for diagnostic use. The mETHYLotest Episignature module is an exploratory bioinformatics tool designed to provide a general idea of methylation profile similarities against known syndrome signatures. Results must be interpreted with caution by qualified professionals and do not constitute a formal medical diagnosis.<br><br>
+  <strong>Development & Support:</strong> mETHYLotest has been developed and tested internally on small datasets at Institut Imagine. As it is an actively maintained package still in early development, future updates to algorithms, thresholds, or reference databases may slightly alter results.<br><br>
+  Bug reports, feature requests, and feedback are welcome: <a href="https://github.com/OMICShub-Imagine/mETHYLotest/issues">Open an issue</a>.<br>
+  mETHYLotest is a free R package and comes with ABSOLUTELY NO WARRANTY.
+</div>
+
+---
+
+# Prerequisites
+
+You need:
+
+1.  **An existing mETHYLotest EPIC project**. The directory must contain the `Results/project_config.R` file (generated either by running the main EPIC pipeline, or just by creating the project structure via the UI).
+2.  Your `pheno.xlsx` file and IDAT files must be correctly referenced in the project config.
+
+---
+
+# Launching the Module
+
+The Episignatures scoring is run programmatically via a single R command. It does not require you to go through the interactive UI again.
+
+```{r launch}
+library(mETHYLotest)
+
+# Provide the project directory directly
+mETHYLotest.EPIC.Episignatures("/path/to/My_EPIC_Project")
+```
+
+The pipeline will automatically execute all the steps: IDAT loading, normalization, Z-score computation, and report generation.
+
+---
+
+# Interpreting the Report
+
+The module outputs an interactive HTML report located in your project's `Results/Episignatures_Scoring/` folder.
+
+## 1. Global Heatmap & Ranking Table
+
+The report starts with an overview of all tested samples and signatures. It provides:
+
+-   **Global Heatmap**: A visual representation of the **Global Score** (the percentage of significant probes relative to the total signature size) for every sample-signature combination. This allows you to quickly identify strong matches (highlighted in warmer colors like orange or red).
+-   **Ranking Table**: A detailed, interactive table sorting all results by their Global Score. It includes essential metrics such as the percentage of significant probes, coverage (how much of the signature was found in the data), and raw probe counts.
+
+## 2. Per-Sample Analysis
+
+For a more granular view, the report dedicates a section to each individual sample:
+
+-   **Lollipop Plot**: Visually ranks the signatures for a specific sample, showing the top hits to easily distinguish the most likely episignatures.
+-   **Sample Metrics**: A specific data table containing all the signature scores and coverage metrics for that particular patient, allowing for precise evaluation of the most significant hits.
+
+---
+
+# Extracting Data Manually
+
+If you need to perform custom downstream statistical analyses or create publication-ready plots, all the raw scores and processed metrics are saved as `.rds` and `.csv` files inside `Results/Episignatures_Scoring/`.
+
+You can easily import them back into R!
+
+```{r manual_data}
+# Example: Loading the raw scores back into R
+scores <- readRDS("/path/to/My_EPIC_Project/Results/Episignatures_Scoring/episignature_scores.rds")
+head(scores)
+```
