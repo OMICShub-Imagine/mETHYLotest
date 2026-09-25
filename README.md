@@ -424,7 +424,7 @@ If you use mETHYLotest in your research, please cite:
 
 > Doldi N, Nitschké P, de Dieuleveult M, Puig Lombardi ME (2026).
 > *mETHYLotest: a unified toolkit for reproducible multi-platform DNA methylation analysis.*
-> R package version 1.0.0. Institut Imagine, Paris, France.
+> R package version 1.1.0. Institut Imagine, Paris, France.
 
 ```r
 citation("mETHYLotest")
