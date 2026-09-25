@@ -34,7 +34,7 @@ Bug reports, feature requests, and feedback are welcome:
 |--------|--------|-------|---------|
 | **EPIC** | Stable | Illumina 450K / EPICv1 / EPICv2 / Mouse IDAT files | [ChAMP](https://bioconductor.org/packages/ChAMP/) |
 | **NGS** | Stable | WGBS, RRBS, Nanopore (modkit, f5c), PacBio (pb-CpG-tools) | [methylKit](https://bioconductor.org/packages/methylKit/) |
-| **Episignatures** | Stable | Existing EPIC project | |
+| **Episignatures** | Released | Existing EPIC project | |
 
 ---
 
@@ -193,7 +193,7 @@ Reports generated from the NGS demo dataset:
 | **Validation Report** | SVM, PCA, heatmap, silhouette, top loci per signature | [View](https://htmlpreview.github.io/?https://github.com/OMICShub-Imagine/mETHYLotest/blob/main/inst/tutorials/NGS_DEMO_Validation_Report.html) |
 | **Final Report** | Project summary, diff methylation, annotation, file inventory | [View](https://htmlpreview.github.io/?https://github.com/OMICShub-Imagine/mETHYLotest/blob/main/inst/tutorials/NGS_DEMO_Final_Report.html) |
 
-### Episignature Scoring on EPIC Array (Experimental)
+### Episignature Scoring on EPIC Array (Released - with clinical caveat)
 
 ```r
 # Run on an existing EPIC project
