@@ -34,7 +34,7 @@ Bug reports, feature requests, and feedback are welcome:
 |--------|--------|-------|---------|
 | **EPIC** | Stable | Illumina 450K / EPICv1 / EPICv2 / Mouse IDAT files | [ChAMP](https://bioconductor.org/packages/ChAMP/) |
 | **NGS** | Stable | WGBS, RRBS, Nanopore (modkit, f5c), PacBio (pb-CpG-tools) | [methylKit](https://bioconductor.org/packages/methylKit/) |
-| **Episignatures** | Experimental | Existing EPIC project | |
+| **Episignatures** | Stable | Existing EPIC project | |
 
 ---
 
