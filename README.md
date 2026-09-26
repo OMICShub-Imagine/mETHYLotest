@@ -2,6 +2,7 @@
 
 [![R package](https://img.shields.io/badge/R%20package-1.1.0-blue)](https://github.com/OMICShub-Imagine/mETHYLotest)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22967077.svg)](https://doi.org/10.5281/zenodo.22967077)
 
 **Unified interactive pipeline for DNA methylation analysis.**
 
